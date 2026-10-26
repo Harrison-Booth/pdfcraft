@@ -1593,6 +1593,8 @@ impl DocView {
     /// with no position name no place to mark. (Acrobat's own extent is not documented, so the
     /// box is an approximation.)
     pub fn flash_dest(&mut self, page: usize, dest: DestView, info: &DocInfo) {
+        // Cleared first: a flash left from an earlier link would mark the wrong place.
+        self.flash = None;
         let Some(p) = info.pages.get(page) else { return };
         self.flash = dest_flash_rect(dest, p.crop).map(|r| (page, r, 0.0));
     }
@@ -7939,6 +7941,11 @@ trailer << /Root 1 0 R >>
         assert_eq!(v.flash, Some((0, [50.0, 276.0, 210.0, 300.0], 0.0)));
         v.flash_dest(0, DestView::FitH { top: Some(300.0) }, &info);
         assert_eq!(v.flash, Some((0, [0.0, 276.0, 160.0, 300.0], 0.0)));
+        // An unknown page clears an earlier flash instead of leaving it on the wrong place.
+        v.flash_dest(0, DestView::FitH { top: Some(300.0) }, &info);
+        assert!(v.flash.is_some());
+        v.flash_dest(9, DestView::FitH { top: Some(300.0) }, &info);
+        assert_eq!(v.flash, None);
         // Nothing to mark: no position, a whole-page fit, an unknown page, or junk numbers.
         for (page, dest) in [
             (0, DestView::Top),
