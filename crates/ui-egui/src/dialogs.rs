@@ -26,6 +26,7 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     password(app, ctx);
     save_prompt(app, ctx);
     link_prompt(app, ctx);
+    failed_link_prompt(app, ctx);
     remote_link_prompt(app, ctx);
     full_screen_prompt(app, ctx);
     crate::updates::dialog(app, ctx);
@@ -1854,6 +1855,48 @@ fn link_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
     }
     if let Some(open) = choice {
         app.resolve_pending_link(open);
+    }
+}
+
+/// Report an Issue… when no web browser opened (`failedLink`): the address and the details the
+/// report would have filled in, in read-only fields to copy from. It stays until Close or Escape,
+/// and the details are kept, so nothing the user would have sent is lost.
+fn failed_link_prompt(app: &mut PdfCraftApp, ctx: &egui::Context) {
+    let Some(failed) = app.failed_link.clone() else { return };
+    let t = Tokens::get(ctx);
+    let (mut copy, mut close) = (false, false);
+    let modal = widgets::show_modal(ctx, "failed_link", |ui| {
+        ui.set_width(480.0);
+        ui.horizontal(|ui| {
+            ui.add(crate::icons::image("message-square-warning", 22.0, t.accent));
+            ui.label(egui::RichText::new(tl!("Couldn't open your web browser")).font(theme::semibold(16.0)));
+        });
+        ui.add(egui::Label::new(egui::RichText::new(&failed.error).color(t.text_muted).small()).wrap());
+        ui.add_space(8.0);
+        let label = ui.label(egui::RichText::new(tl!("Address")).color(t.text_muted));
+        ui.add(egui::TextEdit::singleline(&mut failed.url.as_str()).id_salt("failedLink.url").desired_width(f32::INFINITY)).labelled_by(label.id);
+        ui.add_space(8.0);
+        let label = ui.label(egui::RichText::new(tl!("Details")).color(t.text_muted));
+        ui.add(
+            egui::TextEdit::multiline(&mut failed.details.as_str())
+                .id_salt("failedLink.details")
+                .desired_rows(6)
+                .desired_width(f32::INFINITY)
+                .font(egui::TextStyle::Monospace),
+        )
+        .labelled_by(label.id);
+        ui.add_space(14.0);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            close = widgets::pill_button(ui, tl!("Close"), true).clicked();
+            copy = widgets::pill_button(ui, tl!("Copy Details"), false).clicked();
+        });
+    });
+    if copy {
+        // The details, then where to paste them.
+        ctx.copy_text(format!("{}\n\n{}", failed.details, failed.url));
+    }
+    if close || modal.should_close() {
+        app.failed_link = None;
     }
 }
 

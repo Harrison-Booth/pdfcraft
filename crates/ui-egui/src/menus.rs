@@ -219,8 +219,19 @@ const SIGN: &[&str] = &[
     "sign.panel",
 ];
 const WINDOW: &[&str] = &["view.next_tab", "view.previous_tab"];
-const HELP: &[&str] =
-    &["help.shortcuts", SEP, "help.app_page", "help.github", "help.website", "help.discord", SEP, "help.check_updates", SEP, "help.about"];
+const HELP: &[&str] = &[
+    "help.shortcuts",
+    SEP,
+    "help.app_page",
+    "help.github",
+    "help.website",
+    "help.discord",
+    "help.report_issue",
+    SEP,
+    "help.check_updates",
+    SEP,
+    "help.about",
+];
 
 /// A registry shortcut as a craft-keymap chord: `command` is ⌘ (Ctrl elsewhere) and `mac_ctrl`
 /// the Control key on macOS. `None` for a key craft-keymap doesn't name.
@@ -680,6 +691,15 @@ mod tests {
                 "{id} runs something"
             );
         }
+    }
+
+    #[test]
+    fn report_an_issue_is_in_the_help_menu_after_discord() {
+        let at = |id: &str| HELP.iter().position(|h| *h == id).unwrap_or_else(|| panic!("{id} is in Help"));
+        assert_eq!(at("help.report_issue"), at("help.discord") + 1);
+        let (app, ctx) = app(&[]);
+        let bar = linux(&app, &ctx);
+        assert!(bar.find(&CommandRef::new("help.report_issue")).is_some(), "it is in the built bar, which the native menu installs too");
     }
 
     #[test]

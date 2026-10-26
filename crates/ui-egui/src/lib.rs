@@ -145,6 +145,7 @@ mod organize_panel;
 pub mod portable;
 mod protect;
 mod recovery;
+mod report_issue;
 pub mod scroll_speed;
 #[cfg(not(target_arch = "wasm32"))]
 mod system_fonts;
@@ -550,6 +551,10 @@ pub type OsEventsFn = Box<dyn FnMut() -> Vec<OsEvent>>;
 /// is `true` for Save As. Set by the web app when a host page (such as a Nextcloud app) asked
 /// for saves; without it the browser downloads the file.
 pub type HostSaveFn = Box<dyn Fn(&str, &[u8], bool) -> Result<(), String>>;
+
+/// Opens an address in the user's web browser and says whether it could (set by the host app).
+/// Without one, links go through egui, which can't tell the app that no browser opened.
+pub type UrlOpenerFn = Box<dyn Fn(&str) -> Result<(), String>>;
 
 /// Told every frame whether any tab has unsaved work, so a host page can warn before leaving.
 pub type HostDirtyFn = Box<dyn FnMut(bool)>;
@@ -998,6 +1003,13 @@ pub struct PdfCraftApp {
     pub replace_draft: Option<files::ReplaceDraft>,
     /// The last web link the app asked the system to open (tests and automation).
     pub last_opened_url: Option<String>,
+    /// How the host opens a web address and finds out whether it worked ([`UrlOpenerFn`]).
+    pub url_opener: Option<UrlOpenerFn>,
+    /// The graphics adapter the window is drawn with, as the host names it. Reported by Help ▸
+    /// Report an Issue…
+    pub graphics: Option<String>,
+    /// Report an Issue… couldn't open a browser: the dialog that shows what to paste instead.
+    pub failed_link: Option<FailedLink>,
     /// The home screen's community card was closed; it comes back next launch (not remembered).
     pub community_card_closed: bool,
     /// A document asked to open this address; the user hasn't answered yet (#90, #91).
@@ -1028,6 +1040,17 @@ impl LinkOrigin {
             Self::Script => "A script",
         }
     }
+}
+
+/// A report address the system couldn't open, kept with the details so the user can copy them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FailedLink {
+    /// Where to report the issue by hand.
+    pub url: String,
+    /// The version and system details the report would have filled in.
+    pub details: String,
+    /// Why the browser didn't open.
+    pub error: String,
 }
 
 /// An address a document asked to open, waiting for the user to allow or cancel it.
@@ -1279,6 +1302,9 @@ impl PdfCraftApp {
             control: None,
             bookmark_rename: None,
             last_opened_url: None,
+            url_opener: None,
+            graphics: None,
+            failed_link: None,
             community_card_closed: false,
             pending_link: None,
             pending_full_screen: None,
@@ -2289,6 +2315,7 @@ impl PdfCraftApp {
             || self.unlock_prompt.is_some()
             || self.pending_link.is_some()
             || self.pending_remote_link.is_some()
+            || self.failed_link.is_some()
             || self.updates.open
     }
 
@@ -2307,6 +2334,28 @@ impl PdfCraftApp {
             ctx.open_url(egui::OpenUrl::new_tab(url));
         }
         self.last_opened_url = Some(url.to_string());
+    }
+
+    /// Help ▸ Report an Issue…: opens GitHub's bug report form with the version and system details
+    /// filled in. Nothing is sent: the user reads the form and submits it. When no browser opens,
+    /// a dialog keeps the address and the details so they can be copied instead.
+    pub fn report_issue(&mut self) {
+        let facts =
+            report_issue::Facts::new(self.graphics.as_deref(), self.ctx.as_ref().map_or(1.0, |c| c.pixels_per_point()), self.active.is_some());
+        let url = facts.url();
+        self.last_opened_url = Some(url.clone());
+        let opened = match (&self.url_opener, &self.ctx) {
+            (Some(open), _) => open(&url),
+            (None, Some(ctx)) => {
+                ctx.open_url(egui::OpenUrl::new_tab(&url));
+                Ok(())
+            }
+            (None, None) => Err("no window".to_owned()),
+        };
+        if let Err(error) = opened {
+            log::warn!("couldn't open the report form: {error}");
+            self.failed_link = Some(FailedLink { url: pdfcraft_engine::links::NEW_ISSUE.to_owned(), details: facts.details(), error });
+        }
     }
 
     /// A document asks to open `url` (a link, a button's URI action or `app.launchURL`). Web and
@@ -3279,6 +3328,7 @@ impl PdfCraftApp {
             // Don't let Escape or Return resolve unsaved work underneath one.
             let covered = self.pending_link.is_some()
                 || self.pending_remote_link.is_some()
+                || self.failed_link.is_some()
                 || self.pending_full_screen.is_some()
                 || self.updates.open
                 || self.dialog.is_some()

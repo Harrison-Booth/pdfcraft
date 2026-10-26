@@ -11,6 +11,9 @@ pub const DISCORD: &str = "https://discord.gg/artcraft";
 pub const WEBSITE: &str = "https://getartcraft.com";
 pub const APP_PAGE: &str = "https://getartcraft.com/apps/pdfcraft";
 pub const GITHUB: &str = "https://github.com/storytold/pdfcraft";
+/// Where Help ▸ Report an Issue… sends people: GitHub's new-issue page, which opens the bug report
+/// form (`.github/ISSUE_TEMPLATE/bug_report.yml`) with the fields the app fills in.
+pub const NEW_ISSUE: &str = "https://github.com/storytold/pdfcraft/issues/new";
 
 /// A link and the registry command that opens it.
 #[derive(Clone, Copy, Debug)]

@@ -113,3 +113,110 @@ fn about_dialog_has_contributors_and_models_tabs() {
     h.run_steps(4);
     assert!(h.query_all_by_label("Anthropic").count() >= 1);
 }
+
+/// The parameter names of a Report an Issue… address, in order.
+fn report_param_names(url: &str) -> Vec<&str> {
+    url.split_once('?').expect("a query").1.split('&').map(|p| p.split_once('=').expect("name=value").0).collect()
+}
+
+/// The text copied by the last frames, if any (a click copies on the frame after it).
+fn copied(h: &mut Harness<'static, PdfCraftApp>) -> Option<String> {
+    for _ in 0..4 {
+        h.run_steps(1);
+        let found = h.output().platform_output.commands.iter().find_map(|c| match c {
+            egui::OutputCommand::CopyText(text) => Some(text.clone()),
+            _ => None,
+        });
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
+}
+
+#[test]
+fn report_an_issue_opens_the_prefilled_form_through_the_host_opener() {
+    let opened = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let seen = opened.clone();
+    let mut h = harness(move |app| {
+        app.url_opener = Some(Box::new(move |url| {
+            seen.borrow_mut().push(url.to_owned());
+            Ok(())
+        }))
+    });
+    assert!(h.state_mut().execute("help.report_issue"));
+    h.run_steps(2);
+    let opened = opened.borrow();
+    assert_eq!(opened.len(), 1, "one address is opened, once");
+    let url = &opened[0];
+    assert!(url.starts_with(&format!("{}?template=bug_report.yml&", links::NEW_ISSUE)), "{url}");
+    assert_eq!(report_param_names(url), ["template", "version", "os", "system-info", "document-info"]);
+    assert_eq!(h.state().last_opened_url.as_deref(), Some(url.as_str()));
+    assert!(h.state().failed_link.is_none(), "nothing extra shows when the browser opens");
+    assert!(h.query_by_label("Couldn't open your web browser").is_none());
+    // No document is open.
+    assert!(url.ends_with("document-info=Document%20type%3A%20none"), "{url}");
+}
+
+#[test]
+fn report_an_issue_without_a_host_opener_asks_egui_to_open_it() {
+    let mut h = harness(|_| {});
+    assert!(h.state_mut().execute("help.report_issue"));
+    let url = h.state().last_opened_url.clone().expect("opened");
+    assert!(url.starts_with(links::NEW_ISSUE), "{url}");
+    assert!(h.state().failed_link.is_none());
+}
+
+#[test]
+fn report_an_issue_never_includes_the_document_name_or_path() {
+    let pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF";
+    let mut h = harness(move |app| {
+        app.open_bytes("Secret Budget.pdf", Some("/home/ann/Secret Budget.pdf".to_owned()), pdf.to_vec()).unwrap();
+    });
+    h.state_mut().execute("help.report_issue");
+    let url = h.state().last_opened_url.clone().expect("opened");
+    assert!(url.ends_with("document-info=Document%20type%3A%20pdf"), "{url}");
+    let decoded = url.replace("%20", " ");
+    for private in ["Secret", "Budget", "ann", "/home"] {
+        assert!(!decoded.contains(private), "{private} is in {url}");
+    }
+}
+
+#[test]
+fn a_browser_that_does_not_open_shows_the_address_and_details_to_copy() {
+    // With a document open, so the home screen's own Close button is not on screen.
+    let pdf = b"%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF";
+    let mut h = harness(move |app| {
+        app.open_bytes("one.pdf", None, pdf.to_vec()).unwrap();
+        app.url_opener = Some(Box::new(|_| Err("no browser is installed".to_owned())));
+    });
+    h.state_mut().execute("help.report_issue");
+    h.run_steps(3);
+    h.get_by_label("Couldn't open your web browser");
+    h.get_by_label("no browser is installed");
+    // Read-only fields, named by their labels for assistive technology.
+    h.get_by_role_and_label(egui::accesskit::Role::TextInput, "Address");
+    h.get_by_role_and_label(egui::accesskit::Role::MultilineTextInput, "Details");
+    let failed = h.state().failed_link.clone().expect("the dialog's data");
+    assert_eq!(failed.url, links::NEW_ISSUE);
+    assert!(failed.details.starts_with("Version: PdfCraft ") && failed.details.contains("Document type: pdf"), "{}", failed.details);
+    h.get_by_label("Copy Details").click();
+    let text = copied(&mut h).expect("Copy Details copies");
+    assert_eq!(text, format!("{}\n\n{}", failed.details, links::NEW_ISSUE));
+    assert!(h.state().failed_link.is_some(), "copying keeps the dialog open");
+    h.get_by_label("Close").click();
+    h.run_steps(3);
+    assert!(h.state().failed_link.is_none());
+    assert!(h.query_by_label("Couldn't open your web browser").is_none());
+}
+
+#[test]
+fn escape_closes_the_failed_browser_dialog() {
+    let mut h = harness(|app| app.url_opener = Some(Box::new(|_| Err("no browser".to_owned()))));
+    h.state_mut().execute("help.report_issue");
+    h.run_steps(3);
+    h.get_by_label("Couldn't open your web browser");
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.state().failed_link.is_none());
+}

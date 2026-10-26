@@ -54,6 +54,8 @@ fn main() {
                     // eframe never raises a close request on a browser reload or tab close, so `guard_quit` never
                     // prompts; ask the browser to confirm instead while a document has unsaved work (#812).
                     warn_before_unload(app.unsaved_flag.clone());
+                    app.url_opener = Some(Box::new(open_in_new_tab));
+                    app.graphics = Some("WebGL (glow, web)".to_owned());
                     // `?host=parent`: a same-origin page embedding PdfCraft in an iframe (such
                     // as the Nextcloud app) passes files in and takes saves back (`host` below).
                     if query_param("host").as_deref() == Some("parent")
@@ -101,6 +103,21 @@ fn warn_before_unload(unsaved: std::sync::Arc<std::sync::atomic::AtomicBool>) {
     });
     if window.add_event_listener_with_callback("beforeunload", handler.as_ref().unchecked_ref()).is_ok() {
         handler.forget();
+    }
+}
+
+/// Opens `url` in a new tab. Without `noopener` the call returns the new window, or nothing when a
+/// pop-up blocker stopped it, which is how Report an Issue… learns it must show the details.
+#[cfg(target_arch = "wasm32")]
+fn open_in_new_tab(url: &str) -> Result<(), String> {
+    let window = web_sys::window().ok_or("no window")?;
+    match window.open_with_url_and_target(url, "_blank").map_err(|e| format!("{e:?}"))? {
+        Some(tab) => {
+            // What `noopener` would have done: the new page gets no handle back to this one.
+            let _ = tab.set_opener(&eframe::wasm_bindgen::JsValue::NULL); // best effort: the tab is already open
+            Ok(())
+        }
+        None => Err("the browser blocked the new tab".to_owned()),
     }
 }
 

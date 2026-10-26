@@ -1480,6 +1480,17 @@ usage = "UI icon, embedded via crates/ui-egui/src/icon_data.rs"
 sha256 = "5812a3be783fdcd73efd2b6026e03131e4b8c6649e7d52aa2dc7bf2e2023a59d"
 
 [[asset]]
+path = "assets/icons/message-square-warning.svg"
+title = "Lucide icon \"message-square-warning\""
+author = "Lucide Contributors (portions Cole Bemis, Feather)"
+source = "https://github.com/lucide-icons/lucide (npm lucide-static 1.49.0, icons/message-square-warning.svg)"
+licence = "ISC"
+licence_file = "assets/icons/LICENSE-lucide.txt"
+kind = "icon"
+usage = "UI icon, embedded via crates/ui-egui/src/icon_data.rs"
+sha256 = "66e83a1ad0a584bc5faa5bd38fdaa4060789d5912813da77dbec900eb01c1bda"
+
+[[asset]]
 path = "assets/icons/messages-square.svg"
 title = "Lucide icon \"messages-square\""
 author = "Lucide Contributors (portions Cole Bemis, Feather)"

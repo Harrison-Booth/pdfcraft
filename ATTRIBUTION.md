@@ -4,7 +4,7 @@
 
 Every asset PdfCraft includes, bundles or uses to build its published material, with its author, source and licence. The policy is in [AGENTS.md](AGENTS.md) §1. The machine-readable list, with the SHA-256 of every asset but the translation catalogs, is [ATTRIBUTION.toml](ATTRIBUTION.toml). Licence texts are kept beside the assets and summarised in [NOTICE](NOTICE).
 
-## In this repository (289)
+## In this repository (290)
 
 | Asset | Title | Author | Licence | Source | Used for |
 |---|---|---|---|---|---|
@@ -144,6 +144,7 @@ Every asset PdfCraft includes, bundles or uses to build its published material, 
 | `assets/icons/message-circle-reply.svg` | Lucide icon "message-circle-reply" | Lucide Contributors (portions Cole Bemis, Feather) | ISC | https://github.com/lucide-icons/lucide (npm lucide-static 1.49.0, icons/message-circle-reply.svg) | UI icon, embedded via crates/ui-egui/src/icon_data.rs |
 | `assets/icons/message-square-text.svg` | Lucide icon "message-square-text" | Lucide Contributors (portions Cole Bemis, Feather) | ISC | https://github.com/lucide-icons/lucide (npm lucide-static 1.49.0, icons/message-square-text.svg) | UI icon, embedded via crates/ui-egui/src/icon_data.rs |
 | `assets/icons/message-square.svg` | Lucide icon "message-square" | Lucide Contributors (portions Cole Bemis, Feather) | ISC | https://github.com/lucide-icons/lucide (npm lucide-static 1.49.0, icons/message-square.svg) | UI icon, embedded via crates/ui-egui/src/icon_data.rs |
+| `assets/icons/message-square-warning.svg` | Lucide icon "message-square-warning" | Lucide Contributors (portions Cole Bemis, Feather) | ISC | https://github.com/lucide-icons/lucide (npm lucide-static 1.49.0, icons/message-square-warning.svg) | UI icon, embedded via crates/ui-egui/src/icon_data.rs |
 | `assets/icons/messages-square.svg` | Lucide icon "messages-square" | Lucide Contributors (portions Cole Bemis, Feather) | ISC | https://github.com/lucide-icons/lucide (npm lucide-static 1.49.0, icons/messages-square.svg) | UI icon, embedded via crates/ui-egui/src/icon_data.rs |
 | `assets/icons/mic.svg` | Lucide icon "mic" | Lucide Contributors (portions Cole Bemis, Feather) | ISC | https://github.com/lucide-icons/lucide (npm lucide-static 1.49.0, icons/mic.svg) | UI icon, embedded via crates/ui-egui/src/icon_data.rs |
 | `assets/icons/minimize.svg` | Lucide icon "minimize" | Lucide Contributors (portions Cole Bemis, Feather) | ISC | https://github.com/lucide-icons/lucide (npm lucide-static 1.49.0, icons/minimize.svg) | UI icon, embedded via crates/ui-egui/src/icon_data.rs |
