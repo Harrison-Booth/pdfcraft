@@ -59,6 +59,32 @@ const MAX_CACHED_PAGES: usize = 24;
 /// `MAX_CACHED_PAGES` so raster tuning never silently retunes text memory.
 const MAX_CACHED_TEXT_PAGES: usize = 24;
 
+/// The user-space rectangle to flash for a destination, within the page's crop box `crop`
+/// (see [`DocView::flash_dest`]). A point with only one coordinate flashes along the other
+/// axis from the crop box's edge; non-finite input marks nothing.
+fn dest_flash_rect(dest: DestView, crop: [f32; 4]) -> Option<[f32; 4]> {
+    const LINE: f32 = 24.0;
+    const WIDTH: f32 = 160.0;
+    let [cx0, cy0, cx1, cy1] = crop;
+    let rect = match dest {
+        DestView::FitR { rect } => rect,
+        DestView::Xyz { left, top, .. } if left.is_some() || top.is_some() => point_box(left, top, crop, WIDTH, LINE),
+        DestView::FitH { top: Some(top) } => point_box(None, Some(top), crop, WIDTH, LINE),
+        DestView::FitV { left: Some(left) } => point_box(Some(left), None, crop, WIDTH, LINE),
+        _ => return None,
+    };
+    let [x0, y0, x1, y1] = rect;
+    let (x0, x1, y0, y1) = (x0.min(x1).max(cx0), x0.max(x1).min(cx1), y0.min(y1).max(cy0), y0.max(y1).min(cy1));
+    (rect.iter().all(|v| v.is_finite()) && x1 > x0 && y1 > y0).then_some([x0, y0, x1, y1])
+}
+
+/// A box hanging down and right from (`left`, `top`); a missing coordinate takes the crop box's
+/// left or top edge.
+fn point_box(left: Option<f32>, top: Option<f32>, crop: [f32; 4], width: f32, height: f32) -> [f32; 4] {
+    let (x, y) = (left.unwrap_or(crop[0]), top.unwrap_or(crop[3]));
+    [x, y - height, x + width, y]
+}
+
 fn rgba_bytes(width: usize, height: usize) -> usize {
     width.saturating_mul(height).saturating_mul(4)
 }
@@ -1559,6 +1585,16 @@ impl DocView {
         if fx.is_some() || fy.is_some() {
             self.goto_point = Some((page, fx, fy, rel));
         }
+    }
+
+    /// Flash the place an internal link lands on, so it can be found on a dense page. The
+    /// rectangle comes from the destination: `/FitR` names one, and a point (`/XYZ`, `/FitH`,
+    /// `/FitV` with a coordinate) gets a box a line high at that point. `/Fit` and a destination
+    /// with no position name no place to mark. (Acrobat's own extent is not documented, so the
+    /// box is an approximation.)
+    pub fn flash_dest(&mut self, page: usize, dest: DestView, info: &DocInfo) {
+        let Some(p) = info.pages.get(page) else { return };
+        self.flash = dest_flash_rect(dest, p.crop).map(|r| (page, r, 0.0));
     }
 
     /// Next page (`true`) or previous page. In two-page view this moves a whole spread: the other
@@ -4551,7 +4587,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         }
     }
     match clicked_link {
-        Some(LinkTarget::Page(p, dest)) => view.go_to_dest(p, dest, info),
+        Some(LinkTarget::Page(p, dest)) => {
+            view.go_to_dest(p, dest, info);
+            view.flash_dest(p, dest, info);
+        }
         Some(LinkTarget::Uri(u)) => app.request_document_url(&u, crate::LinkOrigin::Link),
         Some(LinkTarget::SetLayers { changes, preserve_rb }) => set_layers(app, index, &changes, preserve_rb),
         Some(LinkTarget::RemoteGoTo { file, destination, .. }) => remote_open = Some((view.id, file, destination)),
@@ -7883,6 +7922,36 @@ trailer << /Root 1 0 R >>
         let empty = pdfcraft_render::DocInfo::default();
         v.go_to_dest(1, DestView::FitH { top: Some(100.0) }, &empty);
         assert_eq!((v.current, v.goto_point), (1, None));
+    }
+
+    #[test]
+    fn a_followed_link_flashes_where_its_destination_lands() {
+        let page = |w: f32, h: f32| pdfcraft_render::PageInfo { width: w, height: h, label: String::new(), crop: [0.0, 0.0, w, h], rotation: 0 };
+        let info = pdfcraft_render::DocInfo { pages: vec![page(300.0, 400.0), page(300.0, 400.0)], ..Default::default() };
+        let mut v = view(2, PageLayout::Single, true);
+        // /FitR names the rectangle itself, kept inside the page.
+        v.flash_dest(1, DestView::FitR { rect: [10.0, 20.0, 110.0, 70.0] }, &info);
+        assert_eq!(v.flash, Some((1, [10.0, 20.0, 110.0, 70.0], 0.0)));
+        v.flash_dest(1, DestView::FitR { rect: [-50.0, 20.0, 110.0, 500.0] }, &info);
+        assert_eq!(v.flash, Some((1, [0.0, 20.0, 110.0, 400.0], 0.0)));
+        // A point gets a box hanging from it; a missing coordinate falls back to the page edge.
+        v.flash_dest(0, DestView::Xyz { left: Some(50.0), top: Some(300.0), zoom: None }, &info);
+        assert_eq!(v.flash, Some((0, [50.0, 276.0, 210.0, 300.0], 0.0)));
+        v.flash_dest(0, DestView::FitH { top: Some(300.0) }, &info);
+        assert_eq!(v.flash, Some((0, [0.0, 276.0, 160.0, 300.0], 0.0)));
+        // Nothing to mark: no position, a whole-page fit, an unknown page, or junk numbers.
+        for (page, dest) in [
+            (0, DestView::Top),
+            (0, DestView::Fit),
+            (0, DestView::Xyz { left: None, top: None, zoom: Some(2.0) }),
+            (0, DestView::FitH { top: None }),
+            (9, DestView::FitH { top: Some(300.0) }),
+            (0, DestView::FitR { rect: [f32::NAN, 0.0, 10.0, 10.0] }),
+            (0, DestView::FitR { rect: [500.0, 500.0, 600.0, 600.0] }),
+        ] {
+            v.flash_dest(page, dest, &info);
+            assert_eq!(v.flash, None, "{dest:?} on page {page}");
+        }
     }
 
     #[test]
