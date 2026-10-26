@@ -740,6 +740,9 @@ pub struct PdfCraftApp {
     /// Preferences: open every document at Default zoom and Default page display, whatever
     /// layout or zoom it asks for (#1618).
     pub always_default_view: bool,
+    /// Preferences: a `page / pages` indicator floating over the document, whatever the
+    /// side panels show. Display only; nothing is written to the document.
+    pub show_page_indicator: bool,
     /// Open documents' files, watched for changes on disk.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) watch: file_watch::FileWatch,
@@ -1160,6 +1163,7 @@ impl PdfCraftApp {
             reload_changed_files: true,
             show_secured_notice: true,
             always_default_view: false,
+            show_page_indicator: false,
             #[cfg(not(target_arch = "wasm32"))]
             watch: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
@@ -2642,6 +2646,7 @@ impl PdfCraftApp {
             "default_layout": canvas::display_token(self.view_defaults.layout, self.view_defaults.continuous),
             "default_zoom": self.view_defaults.zoom_name(),
             "always_default_view": self.always_default_view,
+            "show_page_indicator": self.show_page_indicator,
             "highlight_fields": self.view_defaults.highlight_fields,
             "units": self.units,
             "language": self.language,
@@ -2767,6 +2772,9 @@ impl PdfCraftApp {
         }
         if let Some(on) = v["always_default_view"].as_bool() {
             self.always_default_view = on;
+        }
+        if let Some(on) = v["show_page_indicator"].as_bool() {
+            self.show_page_indicator = on;
         }
         if let Some(paper) = v
             .get("print_paper")
@@ -3069,6 +3077,13 @@ impl PdfCraftApp {
                     "on" => true,
                     "off" => false,
                     _ => return Err("always-default-view must be on or off".into()),
+                };
+            }
+            ("page-indicator", _) => {
+                self.show_page_indicator = match value {
+                    "on" => true,
+                    "off" => false,
+                    _ => return Err("page-indicator must be on or off".into()),
                 };
             }
             ("tools-side", _) => {

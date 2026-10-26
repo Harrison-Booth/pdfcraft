@@ -59,6 +59,27 @@ const MAX_CACHED_PAGES: usize = 24;
 /// `MAX_CACHED_PAGES` so raster tuning never silently retunes text memory.
 const MAX_CACHED_TEXT_PAGES: usize = 24;
 
+/// The page indicator's text: `4 / 42`, or `iv (4 / 42)` when the page has a label that is not
+/// its number (as Acrobat's page box does). Out of range (no pages) reads `0 / 0`.
+fn page_indicator_text(current: usize, count: usize, label: &str) -> String {
+    let number = if current < count { current + 1 } else { count };
+    if label.is_empty() || label == number.to_string() || current >= count {
+        format!("{number} / {count}")
+    } else {
+        format!("{label} ({number} / {count})")
+    }
+}
+
+/// A small pill at the bottom centre of the document area; display only, it takes no input.
+fn paint_page_indicator(ui: &egui::Ui, avail: Rect, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    let painter = ui.painter().with_clip_rect(avail);
+    let galley = painter.layout_no_wrap(text.to_owned(), theme::medium(12.0), t.text);
+    let pill = Rect::from_center_size(pos2(avail.center().x, avail.bottom() - 22.0), galley.size() + vec2(20.0, 10.0));
+    painter.rect(pill, CornerRadius::same(255), t.chrome.gamma_multiply(0.92), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
+    painter.galley(pill.center() - galley.size() / 2.0, galley, t.text);
+}
+
 fn rgba_bytes(width: usize, height: usize) -> usize {
     width.saturating_mul(height).saturating_mul(4)
 }
@@ -4298,6 +4319,10 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
 
     view.viewport_screen = out.inner_rect;
     view.auto_scroll.paint(ui, avail);
+    if app.show_page_indicator {
+        let label = info.pages.get(view.current).map_or("", |p| p.label.as_str());
+        paint_page_indicator(ui, avail, &page_indicator_text(view.current, info.pages.len(), label));
+    }
     if unobstructed && matches!(tool, QuickTool::Select | QuickTool::ColumnSelect) {
         copy_selected |= selection_actions(ui, avail, view, info, prefs, allowed && !comments_hidden, can_copy);
     }
@@ -7840,6 +7865,17 @@ trailer << /Root 1 0 R >>
         let mut v = zoomed(0, vec2(800.0, 565.0));
         v.go_to_dest(1, DestView::Xyz { left: None, top: None, zoom: None }, &info);
         assert_eq!((v.current, v.goto, v.goto_point), (1, Some((1, 0.0)), None));
+    }
+
+    #[test]
+    fn the_page_indicator_reads_page_over_pages_with_the_label_when_it_differs() {
+        assert_eq!(page_indicator_text(3, 42, ""), "4 / 42");
+        assert_eq!(page_indicator_text(3, 42, "4"), "4 / 42");
+        assert_eq!(page_indicator_text(3, 42, "iv"), "iv (4 / 42)");
+        // No pages, or a page past the end: never beyond the last.
+        assert_eq!(page_indicator_text(0, 0, ""), "0 / 0");
+        assert_eq!(page_indicator_text(9, 3, "x"), "3 / 3");
+        assert_eq!(page_indicator_text(usize::MAX, 3, ""), "3 / 3");
     }
 
     #[test]
