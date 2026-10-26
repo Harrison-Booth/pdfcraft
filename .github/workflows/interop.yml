@@ -11,6 +11,7 @@ on:
       - "crates/crypt/**"
       - "crates/engine/**"
       - "crates/automation/**"
+      - "crates/oracle/**"
   workflow_dispatch:
 
 # The token is only used to check out the code: no job writes to the repository.

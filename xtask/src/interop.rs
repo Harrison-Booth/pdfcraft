@@ -433,7 +433,8 @@ fn check_reader(reader: &Probe, case: &Case, out: &Path, checks: &mut Vec<Check>
         Ok(reader) => reader,
         Err(skipped) => {
             // The checks the reader would have made, so the skip shows in the table.
-            for name in ["open", "render"] {
+            let password_checks = ["owner password opens", "wrong password refused", "no password refused"];
+            for name in ["open", "render"].into_iter().chain(password_checks.into_iter().filter(|_| case.encrypted)) {
                 add(skipped.name, name, Outcome::Skip(skipped.why.clone()));
             }
             return;
@@ -584,6 +585,19 @@ mod tests {
             pages: 1,
             generated,
             checks: checks.into_iter().map(|(reader, outcome)| Check { reader, name: "open", outcome }).collect(),
+        }
+    }
+
+    #[test]
+    fn a_missing_reader_skips_every_check_it_would_have_made() {
+        let missing: Probe = Err(Skipped { name: "mupdf", why: "not installed".to_owned() });
+        let out = Path::new("out");
+        for case in cases(out) {
+            let mut checks = Vec::new();
+            check_reader(&missing, &case, out, &mut checks);
+            let want = if case.encrypted { 5 } else { 2 };
+            assert_eq!(checks.len(), want, "{}", case.name);
+            assert!(checks.iter().all(|c| matches!(c.outcome, Outcome::Skip(_))));
         }
     }
 
