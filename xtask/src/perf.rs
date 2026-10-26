@@ -169,6 +169,16 @@ fn peak_kib(pid: u32) -> Option<u64> {
     line.split_whitespace().nth(1)?.parse().ok()
 }
 
+/// The peak of a phase after all its runs. Where `/proc` has it (Linux) a phase that never yielded
+/// one exited before the first sample, which would silently skip its memory budget, so that is an
+/// error; elsewhere no peak is expected.
+fn require_peak(peak: Option<u64>, linux: bool) -> Result<Option<u64>> {
+    if linux && peak.is_none() {
+        bail!("exited before its peak memory could be read in any run; use a larger input or more --runs");
+    }
+    Ok(peak)
+}
+
 /// Run `pdfcraft-cli run --script` in `dir`; returns wall time and the last peak memory seen.
 /// The high-water mark only rises, so the last sample before the exit is within one poll of it.
 fn run_phase(exe: &Path, dir: &Path, steps: &serde_json::Value) -> Result<(f64, Option<u64>)> {
@@ -286,6 +296,7 @@ pub fn run(args: &[String]) -> Result<()> {
                 best = Some(best.map_or((secs, peak), |(s, p)| (s.min(secs), p.max(peak))));
             }
             let (secs, peak_kib) = best.unwrap_or_default();
+            let peak_kib = require_peak(peak_kib, cfg!(target_os = "linux")).with_context(|| format!("{}/{phase}", size.name))?;
             eprintln!("  {phase:<17} {secs:>7.2} s  {}", peak_kib.map_or("peak n/a".into(), |k| format!("{:>6} MiB", k / 1024)));
             measured.push(Measurement { size: size.name.into(), phase: phase.into(), pages: size.pages, file_bytes: input.len(), secs, peak_kib });
         }
@@ -314,6 +325,13 @@ mod tests {
 
     fn budgets() -> Budgets {
         serde_json::from_str(r#"{"small": {"open": {"max_secs": 2.0, "max_peak_mib": 100.0}}}"#).unwrap()
+    }
+
+    #[test]
+    fn a_linux_phase_without_a_peak_is_an_error() {
+        assert!(require_peak(None, true).is_err());
+        assert_eq!(require_peak(Some(7), true).unwrap(), Some(7));
+        assert_eq!(require_peak(None, false).unwrap(), None);
     }
 
     #[test]
