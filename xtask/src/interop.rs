@@ -534,6 +534,18 @@ fn report(results: &[CaseResult], readers: &[Probe]) -> Value {
     })
 }
 
+/// Remove what an earlier run left in `out`, and nothing else: `--out` may be a directory that holds
+/// other files (`--out .`), so the suite never deletes the directory itself.
+fn clean(out: &Path) {
+    for case in cases(out) {
+        let _ = std::fs::remove_file(case.file(out));
+        let _ = std::fs::remove_file(out.join(format!("{}.steps.json", case.name)));
+        let _ = std::fs::remove_dir_all(out.join(case.name));
+    }
+    let _ = std::fs::remove_file(out.join("interop-id.p12"));
+    let _ = std::fs::remove_file(out.join("interop.json"));
+}
+
 pub fn run(args: &[String]) -> anyhow::Result<()> {
     let out = args.iter().position(|a| a == "--out").and_then(|i| args.get(i + 1)).map_or_else(|| gates::target_dir().join("interop"), PathBuf::from);
     let out = std::path::absolute(&out).with_context(|| format!("{}: not a usable directory", out.display()))?;
@@ -546,8 +558,8 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     }
 
     gates::run_args(&["build", "--release", "-p", "pdfcraft-cli"])?;
-    let _ = std::fs::remove_dir_all(&out);
     std::fs::create_dir_all(&out).with_context(|| format!("{}: cannot create", out.display()))?;
+    clean(&out);
     let results = run_suite(&gates::release_cli(), &out, &readers);
 
     let json = serde_json::to_string_pretty(&report(&results, &readers))?;
@@ -573,6 +585,29 @@ mod tests {
             generated,
             checks: checks.into_iter().map(|(reader, outcome)| Check { reader, name: "open", outcome }).collect(),
         }
+    }
+
+    #[test]
+    fn clean_removes_the_suites_files_and_keeps_the_rest() {
+        let out = std::env::temp_dir().join(format!("pdfcraft-interop-clean-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        let first = cases(&out).into_iter().next().expect("the suite has cases");
+        std::fs::create_dir_all(out.join(first.name)).unwrap();
+        std::fs::write(out.join(first.name).join("page-1.png"), b"x").unwrap();
+        for name in [format!("{}.pdf", first.name), format!("{}.steps.json", first.name), "interop.json".to_owned(), "interop-id.p12".to_owned()] {
+            std::fs::write(out.join(name), b"x").unwrap();
+        }
+        std::fs::write(out.join("notes.txt"), b"keep").unwrap();
+        std::fs::create_dir_all(out.join("other")).unwrap();
+        std::fs::write(out.join("other").join("kept.txt"), b"keep").unwrap();
+
+        clean(&out);
+
+        let mut left: Vec<_> = std::fs::read_dir(&out).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        assert_eq!(left, ["notes.txt", "other"]);
+        assert!(out.join("other").join("kept.txt").exists());
+        let _ = std::fs::remove_dir_all(&out);
     }
 
     #[test]

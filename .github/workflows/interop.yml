@@ -45,8 +45,11 @@ jobs:
         env:
           PDFCRAFT_ORACLES_REQUIRED: "1"
         run: |
-          set -o pipefail
-          { echo '```'; cargo xtask interop; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+          status=0
+          result=$(cargo xtask interop) || status=$?
+          printf '%s\n' "$result"
+          { echo '```'; printf '%s\n' "$result"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
       - name: Upload the result and the files
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
