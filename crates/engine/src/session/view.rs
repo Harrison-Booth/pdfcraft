@@ -54,7 +54,7 @@ impl Session {
             return Some(c());
         }
         // The reproducible-builds convention: a set variable fixes every stamp, so that the
-        // same edits to the same file save to the same bytes.
+        // same edits to the same unencrypted file save to the same bytes.
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(t) = source_date_epoch(std::env::var("SOURCE_DATE_EPOCH").ok().as_deref()) {
             return Some(t);
@@ -70,7 +70,7 @@ impl Session {
     /// A dynamic stamp's second line: "By Ada at 2:14 pm, Oct 02, 2026" (local time).
     pub fn stamp_by_line(&self, author: &str) -> String {
         let offset = self.local_offset();
-        let d = self.now().map(|t| pdfcraft_cos::pdf_date(t + offset)).unwrap_or_default();
+        let d = self.now().map(|t| pdfcraft_cos::pdf_date(t.saturating_add(offset))).unwrap_or_default();
         let num = |a: usize, b: usize| d.get(a..b).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
         let (y, mo, day, hh, mm) = (num(2, 6), num(6, 8), num(8, 10), num(10, 12), num(12, 14));
         const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -81,7 +81,7 @@ impl Session {
 
     pub fn today(&self) -> (i64, u32, u32) {
         let offset = self.local_offset();
-        self.now().map(|t| pdfcraft_cos::pdf_date(t + offset)).as_deref().and_then(parse_ymd).unwrap_or((1970, 1, 1))
+        self.now().map(|t| pdfcraft_cos::pdf_date(t.saturating_add(offset))).as_deref().and_then(parse_ymd).unwrap_or((1970, 1, 1))
     }
 
     /// Open a document from bytes. Rendering starts lazily when pages are requested.

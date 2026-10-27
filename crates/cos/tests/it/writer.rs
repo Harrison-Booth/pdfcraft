@@ -520,7 +520,7 @@ fn af_fixture() -> Vec<u8> {
         .version("2.0")
         .obj("<< /Type /Catalog /Pages 2 0 R /AF [5 0 R] >>")
         .obj("<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>")
-        .obj("<< /Type /Page /Parent 2 0 R /AF 5 0 R >>")
+        .obj("<< /Type /Page /Parent 2 0 R /AF [5 0 R] >>")
         .obj("<< /Producer (x) >>")
         .obj("<< /Type /Filespec /F (a.xml) /UF (a.xml) /AFRelationship /Data /EF << /F 6 0 R >> >>")
         .stream("/Type /EmbeddedFile /Subtype /text#2Fxml", "<a/>")
@@ -528,13 +528,35 @@ fn af_fixture() -> Vec<u8> {
         .build()
 }
 
-fn has_af(bytes: Vec<u8>) -> bool {
+/// Whether `holder`'s `/AF` array still holds the fixture's file spec: relationship `Data` and
+/// an embedded `<a/>` stream of type text/xml.
+fn has_af(doc: &Document, holder: &Object) -> bool {
+    let Some(spec) = holder
+        .as_dict()
+        .and_then(|d| d.get(b"AF"))
+        .map(|o| doc.resolve(o))
+        .and_then(|a| a.as_array().and_then(|a| a.first().map(|o| doc.resolve(o))))
+    else {
+        return false;
+    };
+    let Some(spec) = spec.as_dict() else { return false };
+    let relationship = spec.get(b"AFRelationship").map(|o| doc.resolve(o));
+    let file = spec.get(b"EF").map(|o| doc.resolve(o)).and_then(|ef| ef.as_dict().and_then(|d| d.get(b"F")).map(|o| doc.resolve(o)));
+    matches!(relationship.as_deref().and_then(Object::as_name), Some(b"Data"))
+        && matches!(file.as_deref(), Some(Object::Stream(s)) if s.dict.get(b"Subtype").map(|o| doc.resolve(o)).and_then(|o| o.as_name().map(<[u8]>::to_vec)).as_deref() == Some(b"text/xml".as_slice()))
+}
+
+fn af_survives(bytes: Vec<u8>) -> bool {
     let doc = Document::open(Arc::new(bytes)).unwrap();
     let root = doc.resolve(doc.trailer().get(b"Root").unwrap());
-    let spec = doc.resolve(&root.as_dict().unwrap().get(b"AF").unwrap().as_array().unwrap()[0]);
-    let ef = doc.resolve(spec.as_dict().unwrap().get(b"EF").unwrap());
-    let file = doc.resolve(ef.as_dict().unwrap().get(b"F").unwrap());
-    matches!(*file, Object::Stream(ref s) if s.dict.get(b"Subtype").is_some())
+    let pages = root.as_dict().and_then(|d| d.get(b"Pages")).map(|o| doc.resolve(o));
+    let page = pages
+        .as_deref()
+        .and_then(Object::as_dict)
+        .and_then(|d| d.get(b"Kids"))
+        .map(|o| doc.resolve(o))
+        .and_then(|k| k.as_array().and_then(|k| k.first().map(|o| doc.resolve(o))));
+    has_af(&doc, &root) && page.is_some_and(|p| has_af(&doc, &p))
 }
 
 #[test]
@@ -550,7 +572,7 @@ fn saves_are_byte_identical_across_runs_and_keep_associated_files() {
             let inc: Vec<Vec<u8>> = (0..4).map(|_| write_incremental(&Document::open(Arc::new(bytes.clone())).unwrap(), &opts).unwrap()).collect();
             assert!(inc.windows(2).all(|w| w[0] == w[1]), "incremental save differs between runs");
             if bytes == af_fixture() {
-                assert!(has_af(saved[0].clone()) && has_af(inc[0].clone()));
+                assert!(af_survives(saved[0].clone()) && af_survives(inc[0].clone()));
             }
         }
     }
