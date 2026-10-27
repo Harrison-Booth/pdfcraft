@@ -810,6 +810,18 @@ impl DocView {
 
 /// Draws the document tab at `index`: its notice bars, then its pages (or the Organize grid) in a
 /// scroll area with this frame's zoom, scrolling, tool input, overlays and render requests.
+/// Gives the page view an accessibility node holding the current page's text, so a screen reader
+/// can read it: the page itself is only pixels. Page structure and the other pages are not exposed yet.
+fn expose_page_text(ctx: &egui::Context, id: egui::Id, view: &DocView) {
+    let Some(text) = view.page_text(view.current) else { return };
+    ctx.accesskit_node_builder(id, |node| {
+        node.set_role(egui::Role::Document);
+        let n = view.page_count.to_string();
+        node.set_label(crate::i18n::fmt(tl!("Page {p} of {n}"), &[("p", &view.current.saturating_add(1).to_string()), ("n", &n)]));
+        node.set_value(text.text_of(0..text.glyphs.len()));
+    });
+}
+
 pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     // Keyboard scrolling applies to this frame's page view only, never later.
@@ -1340,6 +1352,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         }
         let (resp_rect, resp) = ui.allocate_exact_size(vec2(content_w, content_h), Sense::click_and_drag());
         view.page_widget = Some(resp.id);
+        expose_page_text(ui.ctx(), resp.id, view);
         // A drag lasts only while egui reports it, so the mark can't outlive one.
         if !resp.dragged_by(egui::PointerButton::Primary) {
             view.selection_drag = false;
