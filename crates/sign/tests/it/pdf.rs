@@ -352,6 +352,22 @@ fn later_changes_are_classified_under_the_signature_permissions() {
 }
 
 #[test]
+fn a_no_changes_certification_refuses_another_signature() {
+    let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
+    let certified = pdfcraft_sign::sign(&open(&fixture()), &id, &SignOptions { certify: Some(1), ..opts() }).unwrap();
+    let again = |bytes: &[u8]| pdfcraft_sign::sign(&open(bytes), &id, &SignOptions { rect: None, ..opts() });
+    let e = again(&certified).unwrap_err().to_string();
+    assert!(e.contains("certified with no changes allowed"), "{e}");
+    // P 2 and P 3 permit signing, and an approval signature never forbids it.
+    for level in [2, 3] {
+        let c = pdfcraft_sign::sign(&open(&fixture()), &id, &SignOptions { certify: Some(level), ..opts() }).unwrap();
+        again(&c).unwrap();
+    }
+    let approved = pdfcraft_sign::sign(&open(&fixture()), &id, &opts()).unwrap();
+    again(&approved).unwrap();
+}
+
+#[test]
 fn invisible_signatures_and_refusals() {
     let id = pkcs12::open(&data("ec-p256.p12"), "test").unwrap();
     let signed = pdfcraft_sign::sign(&open(&fixture()), &id, &SignOptions { rect: None, ..opts() }).unwrap();

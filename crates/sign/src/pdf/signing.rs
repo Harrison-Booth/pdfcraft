@@ -89,6 +89,22 @@ pub struct SignOptions {
     pub graphic: Option<crate::graphic::Graphic>,
 }
 
+/// A document certified "no changes" (DocMDP `/P 1`, ISO 32000-2 §12.8.2.2, Table 257) permits no
+/// further signature, so signing it would make a document that reads as modified.
+fn check_certification(doc: &Document) -> Result<(), SignError> {
+    let certified = doc
+        .root()
+        .and_then(|r| doc.get(r).as_dict().cloned())
+        .and_then(|c| c.get(b"Perms").map(|p| doc.resolve(p)).and_then(|p| p.as_dict().and_then(|p| p.get(b"DocMDP").map(|v| doc.resolve(v)))))
+        .and_then(|v| v.as_dict().and_then(|v| super::validate::docmdp(doc, v)));
+    if certified == Some(1) {
+        return Err(SignError::Pdf(
+            "the document was certified with no changes allowed, so it can't be signed again; ask its author for an uncertified copy".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// What an encrypted document's permissions (ISO 32000-2 §7.6.4.2, Table 22) allow when it was
 /// opened with the user password (the owner may do anything): signing an existing, empty
 /// signature field is filling in a form field (bit 9, or bit 6); creating a new signature
@@ -151,6 +167,7 @@ fn sign_inner(
     if doc.encryption_changed() {
         return Err(SignError::Pdf("save the document's new security settings before signing it".into()));
     }
+    check_certification(doc)?;
     check_signing_permissions(doc, opts)?;
     let mut doc = doc.clone();
     let root = doc.root().ok_or_else(|| SignError::Pdf("the document has no catalog".into()))?;
