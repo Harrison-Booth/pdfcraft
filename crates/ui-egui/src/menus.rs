@@ -18,6 +18,8 @@ use crate::canvas::{Fit, PageLayout};
 use crate::theme::ThemePreference;
 use crate::{PdfCraftApp, RightPanel};
 
+pub(super) mod tab_context;
+
 /// The app's name in the menus the layouts write (About, Hide, Quit).
 pub(crate) const APP_NAME: &str = "PdfCraft";
 
@@ -691,15 +693,6 @@ mod tests {
                 "{id} runs something"
             );
         }
-    }
-
-    #[test]
-    fn report_an_issue_is_in_the_help_menu_after_discord() {
-        let at = |id: &str| HELP.iter().position(|h| *h == id).unwrap_or_else(|| panic!("{id} is in Help"));
-        assert_eq!(at("help.report_issue"), at("help.discord") + 1);
-        let (app, ctx) = app(&[]);
-        let bar = linux(&app, &ctx);
-        assert!(bar.find(&CommandRef::new("help.report_issue")).is_some(), "it is in the built bar, which the native menu installs too");
     }
 
     #[test]

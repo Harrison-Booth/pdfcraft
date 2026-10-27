@@ -4070,7 +4070,6 @@ dependencies = [
  "uds_windows",
  "wayland-client",
  "wayland-protocols",
- "webbrowser",
  "windows",
  "winit",
  "winresource",

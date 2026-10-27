@@ -213,6 +213,11 @@ impl PdfCraftApp {
                 }
                 self.dialog = Some(Dialog::NumberPages);
             }
+            "help.report_issue" => {
+                let os = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
+                let ext = self.active_ids().map(|_| "pdf");
+                self.open_url(&pdfcraft_engine::links::report_issue_url(&pdfcraft_engine::build_info::version(), &os, ext));
+            }
             link if pdfcraft_engine::links::for_command(link).is_some() => {
                 if let Some(l) = pdfcraft_engine::links::for_command(link) {
                     self.open_url(l.url);
@@ -698,7 +703,6 @@ impl PdfCraftApp {
             "help.shortcuts" => self.dialog = Some(Dialog::Shortcuts),
             "help.about" => self.dialog = Some(Dialog::About),
             "help.check_updates" => self.check_for_updates(),
-            "help.report_issue" => self.report_issue(),
             _ => return false,
         }
         true

@@ -23,9 +23,6 @@ serde_json = { workspace = true }
 log = { workspace = true }
 # The log timestamp goes through chrono (no hand-rolled calendar code).
 chrono = { workspace = true }
-# Help ▸ Report an Issue… opens the issue form and needs to know whether a browser opened, which
-# egui's `open_url` can't say. The same crate eframe already uses for links; no new crate in the tree.
-webbrowser = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Finder double-click / Open With / Dock drops arrive as Apple events (#73); this small audited
