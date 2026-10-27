@@ -323,7 +323,7 @@ status = "shipped"
 commands = ["file.save"]
 tools = ["doc_save"]
 evidence = ["crates/cos/tests/it/encryption.rs::incremental_edits_of_encrypted_documents_stay_encrypted", "crates/engine/src/tests.rs::encrypted_documents_open_edit_and_save_encrypted"]
-notes = "An incremental save appends to the encrypted file and encrypts only the new objects with the existing handler; a full rewrite re-encrypts every object, and changing or removing security forces a full rewrite. Cited tests cover all four algorithms through our own writer and a hayro reopen; docs/file-format-parity.md says Acrobat DC opened AES-256 and RC4-128 output by hand."
+notes = "An incremental save appends to the encrypted file and encrypts only the new objects with the existing handler; a full rewrite re-encrypts all content subject to the encryption policy (metadata stays unencrypted when /EncryptMetadata is false), and changing or removing security forces a full rewrite. Cited tests cover all four algorithms through our own writer and a hayro reopen; docs/file-format-parity.md says Acrobat DC opened AES-256 and RC4-128 output by hand."
 
 [[feature]]
 id = "core.copy-on-write-fidelity"
@@ -563,7 +563,7 @@ status = "shipped"
 commands = []
 tools = []
 evidence = ["crates/ui-egui/tests/it/recovery.rs::encrypted_documents_are_autosaved_encrypted_and_recovered_with_the_password"]
-notes = "Snapshots of encrypted documents are written already encrypted, so no plaintext reaches the recovery folder, and recovery asks for the password. The cited UI test covers one AES case; whether other methods and owner-only restricted files recover the same way is not tested."
+notes = "Snapshots of encrypted documents are written with the document's encryption policy, so document content stays encrypted (metadata stays unencrypted when /EncryptMetadata is false), and recovery asks for the password. The cited UI test covers one AES case; whether other methods and owner-only restricted files recover the same way is not tested."
 
 [[feature]]
 id = "core.web-recovery"
