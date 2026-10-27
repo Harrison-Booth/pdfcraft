@@ -169,12 +169,14 @@ pub fn set_info(
     if icon.is_some() && !is_note {
         return Err(AnnotError::Invalid("only sticky notes have an icon".into()));
     }
+    let author = author.map(|a| doc.text_string(a));
+    let subject = subject.map(|s| doc.text_string(s));
     doc.update_dict(r, |d| {
         if let Some(a) = author {
-            d.set(b"T".to_vec(), PdfString::text(a));
+            d.set(b"T".to_vec(), a);
         }
         if let Some(s) = subject {
-            d.set(b"Subj".to_vec(), PdfString::text(s));
+            d.set(b"Subj".to_vec(), s);
         }
         if let Some(i) = icon {
             d.set(b"Name".to_vec(), Object::name(i.name()));

@@ -26,7 +26,7 @@ are borrowed; PDF 2.0 additions and most subset standards are missing. **150–2
 | §7.6.4 | Standard security handler R2–R6 (RC4 40/128, AES-128, AES-256), crypt filters, `/EncryptMetadata`, SASLprep | full | **own**, read and write | `crates/crypt`; written files open in Acrobat DC since #836 (#774: Acrobat needs the catalog outside object streams) |
 | §7.6.5 | Public-key security handler | full | none | `core.open-public-key`, `protect.certificate-encryption` planned |
 | §7.6.2 | Unencrypted signature `/Contents` | yes | yes | signing encrypted documents (#753) |
-| §7.9.2 | Text strings incl. PDF 2.0 UTF-8 | full | PDFDocEncoding, UTF-16 and UTF-8 read; UTF-8 written by `Document::text_string` for 2.0 files, bookmark titles only | `core.pdf20-utf8-strings` partial |
+| §7.9.2 | Text strings incl. PDF 2.0 UTF-8 | full | PDFDocEncoding, UTF-16 and UTF-8 read; UTF-8 written by `Document::text_string` for 2.0 files: bookmark titles, Info, annotation text, form values, attachment descriptions | `core.pdf20-utf8-strings` partial |
 | §7.11 | File specifications, embedded files | full | read and save attachments; no add/delete/describe | `organize.attachments-*` planned |
 | §7.12 | Extensions dictionary | yes | preserved | |
 | §8 | Graphics: paths, colour spaces, patterns, shadings, images, XObjects | full | **borrowed** renderer; own content parser and serializer (`crates/content`) for editing and redaction | rendering P0s partial |

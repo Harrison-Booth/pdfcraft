@@ -3783,3 +3783,32 @@ fn bookmark_titles_follow_the_document_version() {
     add_bookmark(&mut old, &[], 0, "Caf\u{e9}", 0).unwrap();
     assert_eq!(raw(&old)[..2], [0xFE, 0xFF]);
 }
+
+#[test]
+fn info_and_attachment_descriptions_follow_the_document_version() {
+    let raw = |doc: &Document, spec: bool| -> Vec<u8> {
+        if spec {
+            let (_, spec) = attachment_specs(doc).pop().unwrap();
+            spec.get(b"Desc").and_then(Object::as_string).unwrap().bytes.clone()
+        } else {
+            let info = doc.resolve(doc.trailer().get(b"Info").unwrap()).as_dict().cloned().unwrap();
+            info.get(b"Title").and_then(Object::as_string).unwrap().bytes.clone()
+        }
+    };
+    for (version, bom) in [("2.0", [0xEF, 0xBB, 0xBF]), ("1.7", [0xFE, 0xFF, 0x00])] {
+        let mut doc = doc_a();
+        doc.set_version(version);
+        crate::set_info(&mut doc, "Title", "Caf\u{e9}").unwrap();
+        add_attachment(&mut doc, "a.txt", b"x", Some("Caf\u{e9}"), None, None).unwrap();
+        assert_eq!(raw(&doc, false)[..3], bom, "Info {version}");
+        assert_eq!(raw(&doc, true)[..3], bom, "Desc {version}");
+    }
+}
+
+fn attachment_specs(doc: &Document) -> Vec<(String, pdfcraft_cos::Dict)> {
+    let catalog = doc.resolve(doc.trailer().get(b"Root").unwrap()).as_dict().cloned().unwrap();
+    let names = doc.resolve(catalog.get(b"Names").unwrap()).as_dict().cloned().unwrap();
+    let tree = doc.resolve(names.get(b"EmbeddedFiles").unwrap()).as_dict().cloned().unwrap();
+    let pairs = tree.get(b"Names").and_then(Object::as_array).cloned().unwrap();
+    pairs.chunks(2).map(|p| (p[0].as_string().unwrap().to_text(), doc.resolve(&p[1]).as_dict().cloned().unwrap())).collect()
+}

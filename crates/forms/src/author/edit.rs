@@ -116,7 +116,8 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
             if child_named(doc, af, parent, n).is_some_and(|r| r != f.obj) {
                 return invalid(format!("a field named {new_name:?} already exists"));
             }
-            doc.update_dict(f.obj, |d| d.set(b"T".to_vec(), PdfString::text(n)))?;
+            let name = doc.text_string(n);
+            doc.update_dict(f.obj, |d| d.set(b"T".to_vec(), name))?;
         }
         // Calculations read the field by its new name, unless another field keeps the old one.
         if all.iter().filter(|x| x.name == f.name).count() == 1 {
@@ -173,13 +174,15 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
     if props.check_style.is_some() && !matches!(f.kind, FieldKind::CheckBox | FieldKind::Radio) {
         return invalid("only check boxes and radio buttons have a check style");
     }
+    let utf8 = doc.version().starts_with("2.");
+    let text = move |s: &str| if utf8 { PdfString::text_utf8(s) } else { PdfString::text(s) };
     doc.update_dict(f.obj, |d| {
         d.set(b"Ff".to_vec(), Object::Int(ff as i64));
         if let Some(t) = &props.tooltip {
             if t.is_empty() {
                 d.remove(b"TU");
             } else {
-                d.set(b"TU".to_vec(), PdfString::text(t));
+                d.set(b"TU".to_vec(), text(t));
             }
         }
         if let Some(m) = props.max_len {
@@ -191,7 +194,7 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
             }
         }
         if let Some(opts) = &props.options {
-            d.set(b"Opt".to_vec(), Object::Array(opts.iter().map(|o| Object::String(PdfString::text(o))).collect()));
+            d.set(b"Opt".to_vec(), Object::Array(opts.iter().map(|o| Object::String(text(o))).collect()));
         }
         // "Sort items": the list itself is kept in order (export values stay with their items).
         if ff & flags::SORT != 0 && matches!(f.kind, FieldKind::Combo | FieldKind::List) {
@@ -200,16 +203,13 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
                 None => f.options.clone(),
             };
             items.sort_by_key(|(_, display)| display.to_lowercase());
-            let opt = items
-                .iter()
-                .map(|(e, disp)| {
-                    if e == disp {
-                        Object::String(PdfString::text(disp))
-                    } else {
-                        Object::Array(vec![Object::String(PdfString::text(e)), Object::String(PdfString::text(disp))])
-                    }
-                })
-                .collect();
+            let opt =
+                items
+                    .iter()
+                    .map(|(e, disp)| {
+                        if e == disp { Object::String(text(disp)) } else { Object::Array(vec![Object::String(text(e)), Object::String(text(disp))]) }
+                    })
+                    .collect();
             d.set(b"Opt".to_vec(), Object::Array(opt));
         }
         if let Some(q) = props.quadding {
@@ -218,7 +218,7 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
         match &props.default_value {
             // Buttons name their default state; text and choices hold a string.
             Some(Some(v)) if matches!(f.kind, FieldKind::CheckBox | FieldKind::Radio) => d.set(b"DV".to_vec(), Object::Name(crate::name_bytes(v))),
-            Some(Some(v)) => d.set(b"DV".to_vec(), PdfString::text(v)),
+            Some(Some(v)) => d.set(b"DV".to_vec(), text(v)),
             Some(None) => {
                 d.remove(b"DV");
             }
