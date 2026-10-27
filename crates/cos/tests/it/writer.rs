@@ -513,3 +513,53 @@ fn incremental_saves_of_a_file_whose_offsets_count_from_its_first_byte_keep_coun
     // No qpdf check here: qpdf counts every offset from the header in a file with bytes before
     // it, so it already reconstructs this input before anything is appended.
 }
+
+/// A 2.0 file with an associated file on the catalog, the page and a hidden stream.
+fn af_fixture() -> Vec<u8> {
+    Pdf::new()
+        .version("2.0")
+        .obj("<< /Type /Catalog /Pages 2 0 R /AF [5 0 R] >>")
+        .obj("<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>")
+        .obj("<< /Type /Page /Parent 2 0 R /AF 5 0 R >>")
+        .obj("<< /Producer (x) >>")
+        .obj("<< /Type /Filespec /F (a.xml) /UF (a.xml) /AFRelationship /Data /EF << /F 6 0 R >> >>")
+        .stream("/Type /EmbeddedFile /Subtype /text#2Fxml", "<a/>")
+        .trailer_entry("/Info 4 0 R")
+        .build()
+}
+
+fn has_af(bytes: Vec<u8>) -> bool {
+    let doc = Document::open(Arc::new(bytes)).unwrap();
+    let root = doc.resolve(doc.trailer().get(b"Root").unwrap());
+    let spec = doc.resolve(&root.as_dict().unwrap().get(b"AF").unwrap().as_array().unwrap()[0]);
+    let ef = doc.resolve(spec.as_dict().unwrap().get(b"EF").unwrap());
+    let file = doc.resolve(ef.as_dict().unwrap().get(b"F").unwrap());
+    matches!(*file, Object::Stream(ref s) if s.dict.get(b"Subtype").is_some())
+}
+
+#[test]
+fn saves_are_byte_identical_across_runs_and_keep_associated_files() {
+    for bytes in [af_fixture(), fixture()] {
+        for object_streams in [true, false] {
+            let opts = SaveOptions { object_streams, mod_date: Some("D:20260101000000Z".into()), ..SaveOptions::default() };
+            // Each open builds its own hash state, so an order that leaked from a map would differ.
+            let saved: Vec<Vec<u8>> = (0..4).map(|_| write_full(&Document::open(Arc::new(bytes.clone())).unwrap(), &opts).unwrap()).collect();
+            assert!(saved.windows(2).all(|w| w[0] == w[1]), "full save differs between runs");
+            let again = write_full(&Document::open(Arc::new(saved[0].clone())).unwrap(), &opts).unwrap();
+            assert_eq!(again, write_full(&Document::open(Arc::new(saved[0].clone())).unwrap(), &opts).unwrap());
+            let inc: Vec<Vec<u8>> = (0..4).map(|_| write_incremental(&Document::open(Arc::new(bytes.clone())).unwrap(), &opts).unwrap()).collect();
+            assert!(inc.windows(2).all(|w| w[0] == w[1]), "incremental save differs between runs");
+            if bytes == af_fixture() {
+                assert!(has_af(saved[0].clone()) && has_af(inc[0].clone()));
+            }
+        }
+    }
+}
+
+#[test]
+fn a_2_0_document_writes_text_as_utf8() {
+    let mut doc = Document::open(Arc::new(af_fixture())).unwrap();
+    assert_eq!(doc.text_string("Caf\u{e9}").bytes, [&[0xEF, 0xBB, 0xBF][..], "Caf\u{e9}".as_bytes()].concat());
+    doc.set_version("1.7");
+    assert_eq!(doc.text_string("Caf\u{e9}").bytes[..2], [0xFE, 0xFF]);
+}
