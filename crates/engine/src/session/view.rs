@@ -53,6 +53,12 @@ impl Session {
         if let Some(c) = self.clock {
             return Some(c());
         }
+        // The reproducible-builds convention: a set variable fixes every stamp, so that the
+        // same edits to the same unencrypted file save to the same bytes.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(t) = source_date_epoch(std::env::var("SOURCE_DATE_EPOCH").ok().as_deref()) {
+            return Some(t);
+        }
         #[cfg(not(target_arch = "wasm32"))]
         return std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs() as i64);
         #[cfg(target_arch = "wasm32")]
@@ -64,7 +70,7 @@ impl Session {
     /// A dynamic stamp's second line: "By Ada at 2:14 pm, Oct 02, 2026" (local time).
     pub fn stamp_by_line(&self, author: &str) -> String {
         let offset = self.local_offset();
-        let d = self.now().map(|t| pdfcraft_cos::pdf_date(t + offset)).unwrap_or_default();
+        let d = self.now().map(|t| pdfcraft_cos::pdf_date(t.saturating_add(offset))).unwrap_or_default();
         let num = |a: usize, b: usize| d.get(a..b).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
         let (y, mo, day, hh, mm) = (num(2, 6), num(6, 8), num(8, 10), num(10, 12), num(12, 14));
         const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -75,7 +81,7 @@ impl Session {
 
     pub fn today(&self) -> (i64, u32, u32) {
         let offset = self.local_offset();
-        self.now().map(|t| pdfcraft_cos::pdf_date(t + offset)).as_deref().and_then(parse_ymd).unwrap_or((1970, 1, 1))
+        self.now().map(|t| pdfcraft_cos::pdf_date(t.saturating_add(offset))).as_deref().and_then(parse_ymd).unwrap_or((1970, 1, 1))
     }
 
     /// Open a document from bytes. Rendering starts lazily when pages are requested.
@@ -300,5 +306,23 @@ impl Session {
 
     pub fn docs(&self) -> &[Document] {
         &self.docs
+    }
+}
+
+/// `SOURCE_DATE_EPOCH` as seconds, or `None` when it is unset or not a whole number.
+fn source_date_epoch(value: Option<&str>) -> Option<i64> {
+    value?.trim().parse().ok()
+}
+
+#[cfg(test)]
+mod source_date_tests {
+    use super::source_date_epoch;
+
+    #[test]
+    fn only_a_whole_number_fixes_the_clock() {
+        assert_eq!(source_date_epoch(Some(" 1700000000\n")), Some(1_700_000_000));
+        for bad in [None, Some(""), Some("yesterday"), Some("1.5")] {
+            assert_eq!(source_date_epoch(bad), None);
+        }
     }
 }

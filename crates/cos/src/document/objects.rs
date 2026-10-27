@@ -2,6 +2,7 @@ use super::reader::find;
 use super::state::{LENGTHS, LoadGuard, ObjStm, ObjectReader, ReadState, Slot, SourceIdentity, objstm_member, owned_bytes};
 use super::xref::{Revision, XrefEntry};
 use super::*;
+use crate::PdfString;
 
 impl Document {
     pub fn bytes(&self) -> &Arc<Vec<u8>> {
@@ -27,6 +28,11 @@ impl Document {
     /// Set the PDF header version (`"1.4"`, `"1.7"`, `"2.0"`, …) written by a full save.
     pub fn set_version(&mut self, version: impl Into<String>) {
         self.version = version.into();
+    }
+
+    /// A text string for this document: UTF-8 when its header says PDF 2.0, UTF-16BE before.
+    pub fn text_string(&self, s: &str) -> PdfString {
+        if self.version.starts_with("2.") { PdfString::text_utf8(s) } else { PdfString::text(s) }
     }
 
     pub fn trailer(&self) -> &Dict {
