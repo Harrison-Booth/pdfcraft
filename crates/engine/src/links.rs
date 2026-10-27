@@ -37,14 +37,15 @@ pub const LINKS: &[Link] = &[
 pub fn report_issue_url(version: &str, os: &str, document_ext: Option<&str>) -> String {
     let short = |s: &str| s.chars().filter(|c| !c.is_control()).take(16).collect::<String>();
     let ext: String = document_ext.unwrap_or("none").chars().filter(char::is_ascii_alphanumeric).take(8).collect();
-    let (version, environment) = (short(version), format!("{}; document: {ext}", short(os)));
+    let (version, os) = (short(version), short(os));
+    let environment = format!("{os}; document: {ext}");
     let encode = |s: &str| {
         let keep = |b: &u8| b.is_ascii_alphanumeric() || b"-_.~".contains(b);
         s.bytes().map(|b| if keep(&b) { char::from(b).to_string() } else { format!("%{b:02X}") }).collect::<String>()
     };
     let body = format!("PdfCraft {version}\n{environment}");
-    let (v, e, b) = (encode(&version), encode(&environment), encode(&body));
-    format!("{GITHUB}/issues/new?template=bug_report.yml&version={v}&environment={e}&os={e}&body={b}")
+    let (v, e, o, b) = (encode(&version), encode(&environment), encode(&os), encode(&body));
+    format!("{GITHUB}/issues/new?template=bug_report.yml&version={v}&environment={e}&os={o}&body={b}")
 }
 
 pub fn for_command(id: &str) -> Option<&'static Link> {
