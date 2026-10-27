@@ -458,6 +458,9 @@ fn stamped(path: &std::path::Path) -> String {
 #[test]
 fn the_signature_labels_follow_the_interface_language() {
     use pdfcraft_ui_egui::i18n::{Lang, tr};
+    if crate::support::skip_without_glyphs("the_signature_labels_follow_the_interface_language", "zh-hans", "") {
+        return;
+    }
     let p12 = concat!(env!("CARGO_MANIFEST_DIR"), "/../sign/tests/data/ec-p256.p12");
     let cert = pdfcraft_engine::sign::pkcs12::open(&std::fs::read(p12).unwrap(), "test").unwrap().certificate;
     let note = "The labels are in English: the signature's font can't draw them in this language.";
