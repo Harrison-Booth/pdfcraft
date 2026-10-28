@@ -59,6 +59,10 @@ impl crate::Document {
 
 /// The pages a compare range selects, ascending and without repeats (a range is a set here).
 fn compare_pages_of(d: &crate::Document, range: Option<&str>) -> Result<Vec<usize>, EditError> {
+    // `None` is the only way to ask for every page: a blank range is a mistake, not "all".
+    if range.is_some_and(|r| r.trim().is_empty()) {
+        return Err(EditError::Print("compare page range: the range is empty".into()));
+    }
     let mut pages = pdfcraft_print::select_pages(d.info.pages.len(), range, &[], pdfcraft_print::Subset::All, false)
         .map_err(|e| EditError::Print(format!("compare page range: {e}")))?;
     pages.sort_unstable();

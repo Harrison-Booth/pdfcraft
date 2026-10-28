@@ -5212,7 +5212,7 @@ fn comparing_a_page_range_of_each_document() {
     // Page 2 against page 1 is identical.
     assert!(s.compare_pages(old, new, Some("2"), Some("1")).unwrap().identical());
     // Invalid ranges are errors, not an empty comparison.
-    for (o, n) in [(Some("4"), None), (None, Some("0")), (Some("x"), None), (None, Some("3-"))] {
+    for (o, n) in [(Some("4"), None), (None, Some("0")), (Some("x"), None), (None, Some("3-")), (Some(""), None), (None, Some("  "))] {
         assert!(matches!(s.compare_pages(old, new, o, n), Err(EditError::Print(_))), "{o:?} {n:?}");
     }
 }
