@@ -105,7 +105,10 @@ fn check_certification(doc: &Document) -> Result<(), SignError> {
                 return None;
             }
             let old = cache.revision(doc, bytes, covered)?;
-            let level = sig_fields(&old).iter().filter_map(|f| f.signature(&old)).find(|s| nums(&old, s, b"ByteRange").as_ref() == Some(b));
+            let level = sig_fields(&old)
+                .iter()
+                .filter_map(|f| f.signature(&old))
+                .find(|s| nums(&old, s, b"ByteRange").is_some_and(|r| r.len() == 4 && r[2] + r[3] == covered as f64));
             level.map(|s| super::validate::docmdp(&old, &s))
         });
         // A signature whose revision can't be read keeps the level it states now.
