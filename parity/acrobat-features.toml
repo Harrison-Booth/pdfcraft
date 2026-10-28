@@ -431,7 +431,7 @@ status = "partial"
 commands = []
 tools = []
 evidence = ["crates/cos/tests/it/writer.rs::saves_are_byte_identical_across_runs_and_keep_associated_files"]
-notes = "Full and incremental saves keep /AF on the catalog, a page and the file specification with its embedded stream (tested). Missing: listing or editing associated files and /AFRelationship in the UI or a tool, a sanitizer choice, PDF/A-3 checks beyond preflight's AFRelationship rule."
+notes = "Full and incremental saves keep the catalog's and a page's /AF references and the file specification they point to, with its /AFRelationship and embedded stream (tested). Missing: listing or editing associated files and /AFRelationship in the UI or a tool, a sanitizer choice, PDF/A-3 checks beyond preflight's AFRelationship rule."
 
 [[feature]]
 id = "core.pdf20-dpart"
