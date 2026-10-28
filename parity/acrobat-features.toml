@@ -3100,7 +3100,7 @@ status = "shipped"
 commands = []
 tools = []
 evidence = ["crates/organize/src/tests.rs::form_fields_come_along_and_are_registered"]
-notes = "Form fields on copied pages stay interactive: each widget keeps its field hierarchy, top-level fields are added to the destination /AcroForm /Fields, and a repeated page gets its own widget per copy. The source form's other /AcroForm entries (/DA, /DR, /CO, /NeedAppearances) are not copied by this code, so calculated fields and their order may not carry over. Field name collisions are renamed on combine and merged on extract."
+notes = ""
 
 [[feature]]
 id = "organize.preserve-layers"
@@ -3112,7 +3112,7 @@ status = "shipped"
 commands = []
 tools = []
 evidence = ["crates/organize/src/tests.rs::layers_are_registered_with_their_default_state"]
-notes = "Layers (optional content groups) used by copied pages are added to the destination /OCProperties with their on/off default, and are listed in /Order. Only /OCGs, /ON, /OFF and /Order are written: /RBGroups, /Locked, auto states and nested /Order grouping from the source are not carried. The cited test extracts one page of one file with one off layer."
+notes = ""
 
 [[feature]]
 id = "organize.preserve-inherited"
@@ -3124,7 +3124,7 @@ status = "shipped"
 commands = []
 tools = []
 evidence = ["crates/organize/src/tests.rs::inherited_attributes_travel_with_copied_pages"]
-notes = "Inherited page attributes (/Resources, /MediaBox, /CropBox, /Rotate) are pushed onto each copied page, and a /Resources split between the page and its tree node is copied whole. The cited tests check a 90-degree rotation and the split-resources case (#1628); /CropBox inheritance has no test of its own."
+notes = ""
 
 [[feature]]
 id = "organize.preserve-attachments"
@@ -3136,7 +3136,7 @@ status = "shipped"
 commands = []
 tools = []
 evidence = ["crates/organize/src/tests.rs::combine_nests_source_bookmarks_and_keeps_attachments"]
-notes = "Document-level attachments from every combined file are merged into one flat, sorted /EmbeddedFiles name tree, with a duplicate name given a ' (2)' suffix. The cited test combines a file with itself. Only the document-level name tree is merged; I did not check file-attachment annotations or /AF relationships."
+notes = ""
 
 [[feature]]
 id = "organize.field-name-conflicts"
@@ -3304,7 +3304,7 @@ status = "shipped"
 commands = []
 tools = ["bookmark_delete"]
 evidence = ["crates/ui-egui/tests/it/bookmarks.rs::new_rename_reorder_indent_delete_and_undo", "crates/organize/src/tests.rs::bookmarks_add_rename_move_delete", "crates/engine/src/tests.rs::bookmark_edits_show_in_the_viewer_undo_and_save"]
-notes = "Deletes a bookmark and everything under it, relinking its siblings and recomputing /Count. A full save drops the removed objects; an incremental save leaves them unreferenced in the file, so a deleted bookmark's text can still be read from the old bytes until the file is rewritten in full. The walk is cycle-safe."
+notes = ""
 
 [[feature]]
 id = "organize.bookmark-move"
@@ -3316,7 +3316,7 @@ status = "shipped"
 commands = []
 tools = ["bookmark_move"]
 evidence = ["crates/ui-egui/tests/it/bookmarks.rs::new_rename_reorder_indent_delete_and_undo", "crates/organize/src/tests.rs::bookmarks_add_rename_move_delete", "crates/engine/src/tests.rs::bookmark_edits_show_in_the_viewer_undo_and_save", "crates/automation/tests/it/automation.rs::bookmarks_through_tools"]
-notes = "Reorders and re-nests a bookmark by path, relinking only the affected siblings, opening a collapsed new parent, and refusing a move into itself. The cited tests cover a short list; very deep or very wide outlines are not tested here."
+notes = ""
 
 [[feature]]
 id = "organize.bookmark-set-destination"
@@ -3328,7 +3328,7 @@ status = "shipped"
 commands = []
 tools = ["bookmark_set_page"]
 evidence = ["crates/organize/src/tests.rs::bookmarks_add_rename_move_delete", "crates/engine/src/tests.rs::bookmark_edits_show_in_the_viewer_undo_and_save", "crates/automation/tests/it/automation.rs::bookmarks_through_tools"]
-notes = "Points a bookmark at a page with a /Dest of /XYZ null null null (keep the reader's zoom, as the notes in the code say Acrobat writes) and removes any /A so both are never present. This call sets whole-page destinations only, and a bookmark's existing action (any kind) is replaced, not edited."
+notes = ""
 
 [[feature]]
 id = "organize.bookmark-appearance"
@@ -3644,7 +3644,7 @@ status = "shipped"
 commands = ["comment.strikeout"]
 tools = ["comment_add"]
 evidence = ["crates/ui-egui/tests/it/comments.rs::a_selection_made_first_is_marked_when_a_tool_is_picked", "crates/annot/src/tests.rs::every_tool_creates_a_drawable_comment"]
-notes = "Strikethrough markup over selected text, written as a /StrikeOut annotation with an appearance stream that strokes a red line at 42% of the quad height. The cited tests check creation from a selection and that it renders. The same position and thickness caveat as underline applies."
+notes = ""
 
 [[feature]]
 id = "comment.squiggly"
@@ -3788,7 +3788,7 @@ status = "shipped"
 commands = ["comment.circle"]
 tools = ["comment_add"]
 evidence = ["crates/annot/src/tests.rs::every_tool_creates_a_drawable_comment"]
-notes = ""
+notes = "Drag draws an oval as a /Circle annotation with an appearance stream, through the circle command and comment_add (crates/annot/src/appearance.rs). The only cited test is the shared 'every tool creates a drawable comment' one, which makes one oval and checks that it is listed and drawable; no test pins the geometry or the border and fill, and no Acrobat file was compared."
 
 [[feature]]
 id = "comment.polygon"
@@ -3812,7 +3812,7 @@ status = "shipped"
 commands = ["comment.polyline"]
 tools = ["comment_add"]
 evidence = ["crates/annot/src/tests.rs::polygons_clouds_connected_lines_callouts_and_carets_are_drawn", "crates/ui-egui/tests/it/comments.rs::polygons_clouds_connected_lines_callouts_and_inserted_text", "crates/automation/tests/it/automation.rs::drawing_comments_through_tools"]
-notes = ""
+notes = "Connected lines are written as a /PolyLine annotation from the clicked vertices, with optional line endings at the two ends (crates/annot/src/appearance.rs). The cited tests create a three-vertex polyline with no line endings through the UI and the tools and check that it draws. A polyline with line endings, a very long one, and Acrobat's own rendering of the same annotation are not covered."
 
 [[feature]]
 id = "comment.cloud"
@@ -6945,7 +6945,7 @@ status = "shipped"
 commands = ["create.blank"]
 tools = ["doc_create"]
 evidence = ["crates/ui-egui/tests/it/create.rs::opening_images_and_text_converts_them_to_new_pdfs", "crates/create/src/tests.rs::blank_documents", "crates/automation/tests/it/automation.rs::creating_and_reducing_through_tools"]
-notes = ""
+notes = "Creates a new PDF of 1 to 10,000 empty pages with a width and height from 3 to 14,400 points, and refuses anything else (crates/create/src/lib.rs); it is the New blank PDF command and the doc_create tool. The page has no content stream, and the cited tests check the media box and the refusals only. Producer and creation-date metadata and page-size presets were not looked at here."
 
 [[feature]]
 id = "create.from-html"
@@ -7273,7 +7273,7 @@ status = "shipped"
 commands = []
 tools = ["text_extract"]
 evidence = ["crates/render/src/text/tests.rs::rtl_runs_come_out_in_logical_order_and_cjk_has_no_spaces", "crates/render/src/text/tests.rs::lines_words_and_search", "crates/automation/tests/it/automation.rs::parallel_text_extraction_keeps_page_order_and_follows_edits"]
-notes = ""
+notes = "Page text comes out in logical order with lines and words, including right-to-left runs and CJK text without added spaces (crates/render/src/text). The cited tests use short synthetic strings and an automation check of page order. Multi-column reading order has no test cited here, and a font with a missing or broken character map was not tried. Scanned pages have no text until OCR."
 
 [[feature]]
 id = "create.translate"
@@ -7433,7 +7433,7 @@ status = "shipped"
 commands = ["optimize.advanced"]
 tools = ["doc_optimize"]
 evidence = ["crates/optimize/tests/optimize.rs::images_are_measured_where_drawn_and_downsampled"]
-notes = ""
+notes = "Removes each page's /Thumb entry when the setting is on; it is on by default in the optimizer settings (crates/optimize/src/lib.rs). The count it reports is checked by the cited image test and by the discard test."
 
 [[feature]]
 id = "optimize.discard-tags"
@@ -7481,7 +7481,7 @@ status = "shipped"
 commands = ["optimize.advanced"]
 tools = ["doc_optimize"]
 evidence = ["crates/optimize/tests/optimize.rs::discards_and_clean_up"]
-notes = ""
+notes = "Removes seven print-related /ViewerPreferences keys (PrintScaling, Duplex, PickTrayByPDFSize, PrintPageRange, NumCopies, PrintArea and PrintClip) when the setting is on, and keeps other preferences such as HideToolbar (cited test). It is off by default. Only a direct dictionary is exercised by the cited test; the referenced-dictionary branch is in the code but not tested, and no check was made against other print-related keys."
 
 [[feature]]
 id = "optimize.discard-alternate-images"
@@ -9449,7 +9449,7 @@ status = "shipped"
 commands = []
 tools = ["command_list"]
 evidence = ["crates/engine/src/commands.rs::ids_and_shortcuts_are_unique", "crates/ui-egui/tests/it/commands.rs::every_registered_command_is_implemented"]
-notes = ""
+notes = "Every menu item, shortcut, palette entry and the command_list tool read the one COMMANDS table in crates/engine/src/commands.rs. The cited tests check that ids and shortcuts are unique and that every registered command does something in the app. Many shipped commands still have no automation tool, which cargo xtask parity lists."
 
 [[feature]]
 id = "misc.disabled-command-reasons"
@@ -9473,7 +9473,7 @@ status = "shipped"
 commands = []
 tools = ["doc_info", "page_render", "text_extract"]
 evidence = ["crates/automation/tests/it/automation.rs::open_inspect_render_and_find"]
-notes = ""
+notes = "The CLI (and MCP) tools doc_open, doc_info, page_render and text_extract open a file, list pages with sizes and labels and the fonts used (including which stand-in face replaces an unembedded one), render a page to a PNG and extract text. One cited test walks open, info, text, find and render on a three-page synthetic file. Encrypted files, damaged files and large documents are not in that test."
 
 [[feature]]
 id = "misc.cli-edit"
