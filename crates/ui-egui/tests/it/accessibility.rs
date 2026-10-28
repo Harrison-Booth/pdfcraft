@@ -445,5 +445,10 @@ fn the_current_pages_text_is_in_the_accessibility_tree() {
     });
     h.run_steps(8);
     let page = h.get_by_role_and_label(Role::Document, "Page 1 of 1");
-    assert_eq!(page.accesskit_node().value().as_deref(), Some("Hello"));
+    // The text is a text run inside the document, which is what a screen reader's text interface reads.
+    let run = h
+        .query_all_by_role(Role::TextRun)
+        .find(|n| n.accesskit_node().value().as_deref() == Some("Hello"))
+        .expect("a text run holding the page text");
+    assert_eq!(run.accesskit_node().parent().map(|p| p.id()), Some(page.accesskit_node().id()));
 }

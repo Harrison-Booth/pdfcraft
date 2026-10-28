@@ -1968,7 +1968,7 @@ fn draw_pages(
     if view.continuous {
         view.current = current;
     }
-    expose_page_text(ui.ctx(), resp.id, view);
+    expose_page_text(ui, resp.id, view);
     resp.context_menu(|ui| {
         // Preparing a form: the selected field's menu.
         if preparing && let Some((name, wi)) = view.prepare.selected.clone() {
@@ -2369,9 +2369,14 @@ fn plan_renders(ui: &egui::Ui, view: &mut DocView, info: &DocInfo, renders: Page
     // of the document needs no more: shown pages highlight as their text comes, and Copy reads
     // the rest, as text far away is let go to bound memory.)
     let need_text = |p: &usize| !view.texts.contains_key(p) && !view.text_failed.contains(p);
-    // While panning with the Hand tool only the current page's text is wanted: a screen reader reads it.
-    let mut text_pages: Vec<usize> =
-        if hand { Some(cur).filter(need_text).into_iter().collect() } else { visible_now.iter().copied().filter(need_text).collect() };
+    // While panning with the Hand tool only the current page's text is wanted, and only while an
+    // assistive technology is connected: a screen reader reads it.
+    let reading_aloud = ui.ctx().accesskit_node_builder(egui::accesskit_root_id(), |_| ()).is_some();
+    let mut text_pages: Vec<usize> = if hand {
+        reading_aloud.then_some(cur).filter(need_text).into_iter().collect()
+    } else {
+        visible_now.iter().copied().filter(need_text).collect()
+    };
     if view.find.as_ref().is_some_and(|f| !f.case_query.trim().is_empty()) {
         let n = info.pages.len();
         let rest: Vec<usize> = (0..n).map(|k| (cur + k) % n).filter(need_text).filter(|p| !text_pages.contains(p)).collect();
@@ -2834,13 +2839,21 @@ fn refine_goto_point(mut scroll: egui::ScrollArea, view: &mut DocView, geometry:
 
 /// Gives the page view an accessibility node holding the current page's text, so a screen reader
 /// can read it: the page itself is only pixels. Page structure and the other pages are not exposed yet.
-fn expose_page_text(ctx: &egui::Context, id: egui::Id, view: &DocView) {
+fn expose_page_text(ui: &mut egui::Ui, id: egui::Id, view: &DocView) {
     let Some(text) = view.page_text(view.current) else { return };
+    let ctx = ui.ctx().clone();
     ctx.accesskit_node_builder(id, |node| {
         node.set_role(egui::Role::Document);
         let n = view.page_count.to_string();
         node.set_label(crate::i18n::fmt(tl!("Page {p} of {n}"), &[("p", &view.current.saturating_add(1).to_string()), ("n", &n)]));
-        node.set_value(text.text_of(0..text.glyphs.len()));
+    });
+    // A document exposes text ranges through a text run child; a value on the document is not read as text.
+    let run = ui.new_child(egui::UiBuilder::new().id_salt("page_text").accessibility_parent(id));
+    ctx.accesskit_node_builder(run.unique_id(), |node| {
+        let text = text.text_of(0..text.glyphs.len());
+        node.set_role(egui::Role::TextRun);
+        node.set_character_lengths(text.chars().map(|c| c.len_utf8() as u8).collect::<Vec<u8>>());
+        node.set_value(text);
     });
 }
 
