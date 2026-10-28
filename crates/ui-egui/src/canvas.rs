@@ -2879,6 +2879,9 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     if info.pages.is_empty() {
         app.views[index].auto_scroll.cancel();
         ui.centered_and_justified(|ui| ui.label(tl!("This document has no pages.")));
+        if app.show_page_indicator {
+            paint_page_indicator(ui, ui.max_rect(), &page_indicator_text(0, 0, ""));
+        }
         return;
     }
     // The print dialog queues its own rasters later in the frame. Closing it drops them.
