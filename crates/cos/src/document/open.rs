@@ -307,7 +307,9 @@ impl Document {
             let (cfm, len) = if d.v >= 5 { ("AESV3", 32) } else { ("AESV2", 16) };
             std_cf.set(b"CFM".to_vec(), Object::name(cfm));
             std_cf.set(b"Length".to_vec(), Object::Int(len));
-            std_cf.set(b"AuthEvent".to_vec(), Object::name("DocOpen"));
+            // Attachment-only files ask for the password when an embedded file is opened, so other
+            // readers show the pages without a prompt (PdfCraft itself still asks at open).
+            std_cf.set(b"AuthEvent".to_vec(), Object::name(if attachments_only { "EFOpen" } else { "DocOpen" }));
             cf.set(b"StdCF".to_vec(), Object::Dict(std_cf));
             e.set(b"CF".to_vec(), Object::Dict(cf));
             let name = |n: &[u8]| Object::Name(if n.is_empty() { b"Identity".to_vec() } else { n.to_vec() });

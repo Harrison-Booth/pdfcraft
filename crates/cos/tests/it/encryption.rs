@@ -543,6 +543,7 @@ fn only_attachments_are_encrypted_when_asked() {
         assert!(raw.contains("Secret page"), "{alg:?}: page content must stay readable");
         assert!(raw.contains("/EFF/StdCF") || raw.contains("/EFF /StdCF"), "{alg:?}: no /EFF");
         assert!(raw.contains("/StmF/Identity") || raw.contains("/StmF /Identity"), "{alg:?}: no /StmF /Identity");
+        assert!(raw.contains("/AuthEvent/EFOpen") || raw.contains("/AuthEvent /EFOpen"), "{alg:?}: password asked for at attachment access");
         // Read back through the existing reader, which honours /EFF.
         assert!(matches!(Document::open(Arc::new(bytes.clone())), Err(CosError::NeedsPassword)), "{alg:?}");
         let doc = Document::open_with_password(Arc::new(bytes), Some("user")).unwrap();
