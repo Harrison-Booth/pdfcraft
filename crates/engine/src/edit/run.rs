@@ -172,13 +172,15 @@ pub(crate) struct EditCtx {
 }
 
 impl EditCtx {
-    pub(crate) fn new(now: Option<i64>, salt: u64) -> Self {
+    /// `reproducible`: the clock is fixed (`SOURCE_DATE_EPOCH`), so nothing outside the edit, the
+    /// document and the clock may reach the ids it makes.
+    pub(crate) fn new(now: Option<i64>, salt: u64, reproducible: bool) -> Self {
         let mut seed = 0x9E37_79B9_7F4A_7C15u64 ^ salt;
         if let Some(t) = now {
             seed ^= (t as u64).rotate_left(17);
         }
         #[cfg(not(target_arch = "wasm32"))]
-        if now.is_some() {
+        if now.is_some() && !reproducible {
             // Real clock: mix in sub-second time so ids from two sessions don't collide.
             seed ^= std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos() as u64).unwrap_or(0) << 32;
         }
@@ -714,4 +716,19 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod reproducible_tests {
+    use super::EditCtx;
+
+    #[test]
+    fn a_fixed_clock_makes_the_same_ids_whatever_the_wall_clock_says() {
+        let first = EditCtx::new(Some(1_700_000_000), 7, true);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let second = EditCtx::new(Some(1_700_000_000), 7, true);
+        assert_eq!(first.seed, second.seed);
+        // A real clock still separates sessions: its sub-second time is part of the seed.
+        assert_ne!(first.seed, EditCtx::new(Some(1_700_000_000), 7, false).seed);
+    }
 }

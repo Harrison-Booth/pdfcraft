@@ -592,6 +592,7 @@ fn raising_the_version_saves_the_header_with_it() {
     doc.set_version("1.7");
     let mut doc = Document::open(Arc::new(write_incremental(&doc, &SaveOptions::default()).unwrap())).unwrap();
     doc.set_version("2.0");
+    assert!(doc.is_modified(), "a changed version is an unsaved edit");
     let saved = write_incremental(&doc, &SaveOptions::default()).unwrap();
     assert!(saved.starts_with(b"%PDF-2.0"), "an incremental save must not keep the old header under UTF-8 strings");
     assert_eq!(Document::open(Arc::new(saved)).unwrap().version(), "2.0");
