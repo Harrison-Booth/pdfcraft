@@ -553,6 +553,25 @@ fn only_attachments_are_encrypted_when_asked() {
     }
 }
 
+/// A page stream that selects `/StdCF` itself is not an attachment: converting to attachment-only
+/// protection drops the selector, or the page would stay unreadable without the password.
+#[test]
+fn attachment_only_protection_frees_a_page_stream_that_names_the_crypt_filter() {
+    let mut doc = Document::open(Arc::new(fixture_with(" /Filter /Crypt /DecodeParms << /Name /StdCF >>"))).unwrap();
+    doc.set_attachment_encryption(&NewEncryption {
+        algorithm: Algorithm::Aes256,
+        user_password: "user",
+        owner_password: "owner",
+        permissions: -1,
+        encrypt_metadata: true,
+        seed: [7; 32],
+    })
+    .unwrap();
+    let bytes = write_full(&doc, &SaveOptions::default()).unwrap();
+    assert!(String::from_utf8_lossy(&bytes).contains("Secret page"), "the page stays readable");
+    assert_eq!(content(&Document::open_with_password(Arc::new(bytes), Some("user")).unwrap()), SECRET);
+}
+
 #[test]
 fn encrypting_everything_still_covers_attachments() {
     let mut doc = with_attachment();

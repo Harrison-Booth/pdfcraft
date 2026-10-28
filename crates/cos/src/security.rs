@@ -185,7 +185,11 @@ fn walk(o: &Object, strings: &dyn Fn(&PdfString) -> PdfString, h: &SecurityHandl
                 return Object::Stream(Stream { dict, raw: s.raw.clone() });
             }
             let mut named = named_crypt_filter(&s.dict);
-            if pass == Pass::EncryptReplacing && named.as_deref().is_some_and(|n| !h.dict().crypt_filters.iter().any(|(f, _)| f == n)) {
+            // Under attachment-only protection only embedded files use `/StdCF`: a page stream that
+            // names it would stay encrypted though everything else is meant to stay readable.
+            let attachments_only = !h.dict().ef_f.is_empty() && matches!(h.dict().stm_f.as_slice(), b"" | b"Identity");
+            let foreign = |n: &[u8]| !h.dict().crypt_filters.iter().any(|(f, _)| f == n) || (attachments_only && ty != Some(b"EmbeddedFile"));
+            if pass == Pass::EncryptReplacing && named.as_deref().is_some_and(foreign) {
                 drop_crypt_filter(&mut dict);
                 named = None;
             }
