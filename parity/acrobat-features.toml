@@ -1419,7 +1419,7 @@ status = "shipped"
 commands = ["edit.find"]
 tools = []
 evidence = ["crates/ui-egui/tests/it/ui.rs::find_counts_matches_across_pages"]
-notes = ""
+notes = "Find bar with a match count across pages, next/previous, case-sensitive and whole-word options, and a wrap round the document (crates/ui-egui/src/canvas/find.rs, crates/render/src/text/search.rs). The cited test covers a two-page count only; next/previous stepping, the two options and wrapping have no test cited here. Matches come from the extracted text layer, so scanned pages need OCR first."
 
 [[feature]]
 id = "view.find-options"
@@ -1707,7 +1707,7 @@ status = "shipped"
 commands = []
 tools = []
 evidence = ["crates/ui-egui/tests/it/ui.rs::every_catalog_tool_is_listed_after_view_more", "crates/engine/src/commands.rs::every_ready_catalogue_item_is_a_registered_command"]
-notes = ""
+notes = "The All tools panel lists every group from the engine's tool catalogue, with search and an expanded view by category. The cited tests check that every catalogue group is listed and that every Ready item names a registered command; they do not check that a listed item does what its label says, and the milestone badges are catalogue data, not a measured status."
 
 [[feature]]
 id = "view.command-palette"
@@ -1719,7 +1719,7 @@ status = "shipped"
 commands = ["view.palette"]
 tools = []
 evidence = ["crates/ui-egui/tests/it/commands.rs::the_palette_lists_commands_with_shortcuts_and_runs_them"]
-notes = ""
+notes = "The palette searches registered commands and catalogue tools by case-folded substring, then by in-order letters, and shows each command's shortcut (crates/ui-egui/src/dialogs/palette.rs). The cited test runs one command with Enter; arrow-key selection has a separate test. A misspelt query that is not a letter subsequence finds nothing."
 
 [[feature]]
 id = "view.keyboard-shortcuts"
@@ -1743,7 +1743,7 @@ status = "shipped"
 commands = ["help.shortcuts"]
 tools = []
 evidence = ["crates/ui-egui/tests/it/commands.rs::the_shortcuts_dialog_lists_the_real_bindings"]
-notes = ""
+notes = "Lists the registry's shortcuts plus the keys the document view handles itself, written per platform (Ctrl, or ⌘ and ⇧ on macOS). The cited test checks a handful of rows on Linux and macOS labels only. I found no way to rebind shortcuts in the code, and the Windows labels share the Ctrl path with Linux."
 
 [[feature]]
 id = "view.menus-from-registry"
@@ -1755,7 +1755,7 @@ status = "shipped"
 commands = []
 tools = []
 evidence = ["crates/ui-egui/tests/it/commands.rs::the_pages_menu_comes_from_the_registry"]
-notes = ""
+notes = "The menu bar is built from the command registry, so labels and shortcuts come from one place (crates/ui-egui/src/menus.rs); a unit test there checks that every item runs a registry command or a menu-only one and carries its registry shortcut. The cited test opens one submenu item (Delete pages) and runs it; menus are not user-customisable and the macOS native menu bar was not checked here."
 
 [[feature]]
 id = "view.about-dialog"
@@ -1767,7 +1767,7 @@ status = "shipped"
 commands = ["help.about"]
 tools = []
 evidence = ["crates/ui-egui/tests/it/commands.rs::the_about_dialog_shows_the_running_version"]
-notes = ""
+notes = "Shows the product name, the running version from build info, a one-line description and licence, and the credits tabs (contributors and models). The cited test checks the version line only. The rendering line in the dialog still says hayro (bootstrap)."
 
 [[feature]]
 id = "view.check-for-updates"
@@ -2508,7 +2508,7 @@ status = "shipped"
 commands = ["edit.watermark.update", "edit.watermark.remove"]
 tools = ["doc_watermark", "doc_remove_marks"]
 evidence = ["crates/edit/src/tests.rs::replace_and_remove_restore_the_original_content", "crates/engine/src/tests.rs::headers_footers_watermarks_and_backgrounds_show_update_and_remove"]
-notes = ""
+notes = "Update replaces and Remove deletes watermarks that PdfCraft added, found by the /PCMark /Watermark tag on the content stream; removing the last mark restores the page's original content list (crates/edit/src/apply.rs). Watermarks made by other producers, Acrobat's included, carry no such tag and are not found, so they cannot be updated or removed. Only a stream-tagged text or picture watermark is covered by the cited tests; no third-party file is."
 
 [[feature]]
 id = "edit.watermark-appearance"
@@ -2544,7 +2544,7 @@ status = "shipped"
 commands = ["edit.background.update", "edit.background.remove"]
 tools = ["doc_background", "doc_remove_marks"]
 evidence = ["crates/edit/src/tests.rs::replace_and_remove_restore_the_original_content", "crates/engine/src/tests.rs::headers_footers_watermarks_and_backgrounds_show_update_and_remove"]
-notes = ""
+notes = "Update replaces and Remove deletes backgrounds that PdfCraft added, found by the /PCMark /Background tag; removing every mark restores the original content exactly (cited test). Backgrounds made by other producers are not recognised. Only a solid colour with opacity is covered by the cited tests; no third-party file is."
 
 [[feature]]
 id = "edit.decoration-profiles"
@@ -2716,7 +2716,7 @@ status = "shipped"
 commands = []
 tools = ["page_move"]
 evidence = ["crates/organize/src/tests.rs::move_pages_reorders", "crates/ui-egui/tests/it/editing.rs::shift_click_selects_a_range_and_moves_it"]
-notes = ""
+notes = "Moves the selected pages, in their order, to a new position; the page objects keep their identity, so links and bookmarks to them follow (crates/organize/src/lib.rs). It rewrites the whole page tree as one flat node, so an existing nested /Pages tree is flattened on a save, and it does not touch /PageLabels. The cited tests cover the order and a shift-click range move, not a large file or a nested tree."
 
 [[feature]]
 id = "organize.drag-reorder"
@@ -2740,7 +2740,7 @@ status = "shipped"
 commands = ["page.insert_blank"]
 tools = ["page_insert_blank"]
 evidence = ["crates/organize/src/tests.rs::inserts_blank_page", "crates/ui-egui/tests/it/editing.rs::insert_blank_page_after_selection", "crates/engine/src/tests.rs::insert_blank_between_pages_keeps_both_neighbours"]
-notes = ""
+notes = "Inserts a blank page at any position, sized from the neighbouring page in the viewer (200x300 in the cited test) and from the width and height an automation call gives. The new page has an empty resource dictionary and no /CropBox or /Rotate, and, like a move, it flattens the page tree and leaves /PageLabels alone."
 
 [[feature]]
 id = "organize.insert-from-file"
@@ -2944,7 +2944,7 @@ status = "shipped"
 commands = ["page.split"]
 tools = ["doc_split"]
 evidence = ["crates/ui-egui/tests/it/editing.rs::split_before_selected_pages", "crates/ui-egui/tests/it/editing.rs::split_from_organize_grid_context_menu"]
-notes = ""
+notes = "Splits into files before the chosen pages through the Organize grid or the Split dialog (the cited tests check two 'doc (pages a-b).pdf' files). Each file is an Extract copy, so it carries the notes of the copy features: links to pages left behind are dropped, and the tag tree is not copied. The dialog and doc_split name files differently (parts versus -partK), and."
 
 [[feature]]
 id = "organize.split-by-size"
@@ -3076,7 +3076,7 @@ status = "shipped"
 commands = ["page.combine", "page.insert"]
 tools = ["doc_combine"]
 evidence = ["crates/organize/src/tests.rs::combine_and_insert_share_identical_resources", "crates/organize/src/dedupe.rs::merges_bottom_up_and_keeps_identity_objects"]
-notes = ""
+notes = "After combine or insert, byte-identical fonts, images, ICC profiles and similar resources among the newly copied objects are merged into one, and references are rewritten (crates/organize/src/dedupe.rs). Only equal structure is merged, so the same image re-encoded differently stays twice, and pages, annotations, fields, layers and outline items are never merged. The cited test combines one document with itself, not files from different producers."
 
 [[feature]]
 id = "organize.preserve-links-dests"
@@ -3088,7 +3088,7 @@ status = "shipped"
 commands = []
 tools = []
 evidence = ["crates/organize/src/tests.rs::links_are_rewired_to_copied_pages_or_dropped", "crates/organize/src/tests.rs::named_destinations_are_resolved_to_the_copies"]
-notes = ""
+notes = "A copied page's links and GoTo destinations are rewired to the copies of the pages they target, and named destinations are resolved to explicit ones; a link whose target page was not copied is dropped so nothing dangles (crates/organize/src/import.rs). The drop is only noted in the code comments; I found no message to the user about it. The cited tests cover GoTo links and named destinations only."
 
 [[feature]]
 id = "organize.preserve-fields"
@@ -3172,7 +3172,7 @@ status = "shipped"
 commands = ["page.number"]
 tools = ["page_number"]
 evidence = ["crates/organize/src/tests.rs::number_pages_like_acrobat", "crates/engine/src/tests.rs::number_pages_shows_in_the_viewer_and_undoes", "crates/ui-egui/tests/it/bookmarks.rs::number_pages_dialog_labels_the_selected_pages", "crates/automation/tests/it/automation.rs::numbering_pages_through_tools"]
-notes = ""
+notes = "Number Pages sets the style (decimal, roman, alpha), prefix and start number over a page range, keeps later pages' labels, merges continuing ranges, and removes /PageLabels when everything is plain decimal again (crates/organize/src/labels.rs). Deleting pages moves the ranges with them (#2091), but insert and move do not adjust the ranges. Acrobat's own label dialog was not compared."
 
 [[feature]]
 id = "organize.page-boxes"
@@ -3292,7 +3292,7 @@ status = "shipped"
 commands = []
 tools = ["bookmark_rename"]
 evidence = ["crates/ui-egui/tests/it/bookmarks.rs::new_rename_reorder_indent_delete_and_undo", "crates/ui-egui/tests/it/bookmarks.rs::escape_cancels_a_rename", "crates/organize/src/tests.rs::bookmarks_add_rename_move_delete", "crates/organize/src/tests.rs::bookmark_edits_keep_unknown_keys_and_touch_few_objects"]
-notes = ""
+notes = "Renames a bookmark by its path, writing the new title as a text string and rewriting only that item, so colour, style and unknown keys stay (cited test). An empty title is refused. A title with any non-ASCII character is written as UTF-16BE with a BOM (PDFDocEncoding is not used for Latin-1 accents, only for printable ASCII); PDF 2.0 UTF-8 is not written."
 
 [[feature]]
 id = "organize.bookmark-delete"
@@ -3632,7 +3632,7 @@ status = "shipped"
 commands = ["comment.underline"]
 tools = ["comment_add"]
 evidence = ["crates/annot/src/tests.rs::every_tool_creates_a_drawable_comment", "crates/ui-egui/tests/it/comments.rs::a_selection_made_first_is_marked_when_a_tool_is_picked"]
-notes = ""
+notes = "Underline markup over selected text, written as a /Underline annotation with an appearance stream that strokes a line at 8% of the quad height in blue, width capped at 0.5 to 3 points (crates/annot/src/appearance.rs). The cited tests check that the annotation is created and drawable and that a selection made first is marked. The line position and thickness are our own choice, not measured against Acrobat's."
 
 [[feature]]
 id = "comment.strikeout"
@@ -3764,7 +3764,7 @@ status = "shipped"
 commands = ["comment.arrow"]
 tools = ["comment_add"]
 evidence = ["crates/ui-egui/tests/it/comments.rs::shapes_and_ink_are_drawn_by_dragging"]
-notes = ""
+notes = "Drag draws a /Line annotation with an open-arrow ending at the end point and no ending at the start, with the head size scaled from the line width (crates/annot/src/appearance.rs). The cited test checks that a drag creates a Line; it does not look at the arrowhead. A click without a drag draws nothing."
 
 [[feature]]
 id = "comment.rectangle"
@@ -3788,7 +3788,7 @@ status = "shipped"
 commands = ["comment.circle"]
 tools = ["comment_add"]
 evidence = ["crates/annot/src/tests.rs::every_tool_creates_a_drawable_comment"]
-notes = ""
+notes = "Drag draws an oval as a /Circle annotation with an appearance stream, through the circle command and comment_add (crates/annot/src/appearance.rs). The only cited test is the shared 'every tool creates a drawable comment' one, which makes one oval and checks that it is listed and drawable; no test pins the geometry or the border and fill, and no Acrobat file was compared."
 
 [[feature]]
 id = "comment.polygon"
@@ -3812,7 +3812,7 @@ status = "shipped"
 commands = ["comment.polyline"]
 tools = ["comment_add"]
 evidence = ["crates/annot/src/tests.rs::polygons_clouds_connected_lines_callouts_and_carets_are_drawn", "crates/ui-egui/tests/it/comments.rs::polygons_clouds_connected_lines_callouts_and_inserted_text", "crates/automation/tests/it/automation.rs::drawing_comments_through_tools"]
-notes = ""
+notes = "Connected lines are written as a /PolyLine annotation from the clicked vertices, with optional line endings at the two ends (crates/annot/src/appearance.rs). The cited tests create a three-vertex polyline with no line endings through the UI and the tools and check that it draws. A polyline with line endings, a very long one, and Acrobat's own rendering of the same annotation are not covered."
 
 [[feature]]
 id = "comment.cloud"
@@ -6945,7 +6945,7 @@ status = "shipped"
 commands = ["create.blank"]
 tools = ["doc_create"]
 evidence = ["crates/ui-egui/tests/it/create.rs::opening_images_and_text_converts_them_to_new_pdfs", "crates/create/src/tests.rs::blank_documents", "crates/automation/tests/it/automation.rs::creating_and_reducing_through_tools"]
-notes = ""
+notes = "Creates a new PDF of 1 to 10,000 empty pages with a width and height from 3 to 14,400 points, and refuses anything else (crates/create/src/lib.rs); it is the New blank PDF command and the doc_create tool. The page has no content stream, and the cited tests check the media box and the refusals only. Producer and creation-date metadata and page-size presets were not looked at here."
 
 [[feature]]
 id = "create.from-html"
@@ -7273,7 +7273,7 @@ status = "shipped"
 commands = []
 tools = ["text_extract"]
 evidence = ["crates/render/src/text/tests.rs::rtl_runs_come_out_in_logical_order_and_cjk_has_no_spaces", "crates/render/src/text/tests.rs::lines_words_and_search", "crates/automation/tests/it/automation.rs::parallel_text_extraction_keeps_page_order_and_follows_edits"]
-notes = ""
+notes = "Page text comes out in logical order with lines and words, including right-to-left runs and CJK text without added spaces (crates/render/src/text). The cited tests use short synthetic strings and an automation check of page order. Multi-column reading order has no test cited here, and a font with a missing or broken character map was not tried. Scanned pages have no text until OCR."
 
 [[feature]]
 id = "create.translate"
@@ -7433,7 +7433,7 @@ status = "shipped"
 commands = ["optimize.advanced"]
 tools = ["doc_optimize"]
 evidence = ["crates/optimize/tests/optimize.rs::images_are_measured_where_drawn_and_downsampled"]
-notes = ""
+notes = "Removes each page's /Thumb entry when the setting is on; it is on by default in the optimizer settings (crates/optimize/src/lib.rs). The count it reports is checked by the cited image test and by the discard test."
 
 [[feature]]
 id = "optimize.discard-tags"
@@ -7481,7 +7481,7 @@ status = "shipped"
 commands = ["optimize.advanced"]
 tools = ["doc_optimize"]
 evidence = ["crates/optimize/tests/optimize.rs::discards_and_clean_up"]
-notes = ""
+notes = "Removes seven print-related /ViewerPreferences keys (PrintScaling, Duplex, PickTrayByPDFSize, PrintPageRange, NumCopies, PrintArea and PrintClip) when the setting is on, and keeps other preferences such as HideToolbar (cited test). It is off by default. Only a direct dictionary is exercised by the cited test; the referenced-dictionary branch is in the code but not tested, and no check was made against other print-related keys."
 
 [[feature]]
 id = "optimize.discard-alternate-images"
@@ -9449,7 +9449,7 @@ status = "shipped"
 commands = []
 tools = ["command_list"]
 evidence = ["crates/engine/src/commands.rs::ids_and_shortcuts_are_unique", "crates/ui-egui/tests/it/commands.rs::every_registered_command_is_implemented"]
-notes = ""
+notes = "Every menu item, shortcut, palette entry and the command_list tool read the one COMMANDS table in crates/engine/src/commands.rs. The cited tests check that ids and shortcuts are unique and that every registered command does something in the app. Many shipped commands still have no automation tool, which cargo xtask parity lists."
 
 [[feature]]
 id = "misc.disabled-command-reasons"
@@ -9473,7 +9473,7 @@ status = "shipped"
 commands = []
 tools = ["doc_info", "page_render", "text_extract"]
 evidence = ["crates/automation/tests/it/automation.rs::open_inspect_render_and_find"]
-notes = ""
+notes = "The CLI (and MCP) tools doc_open, doc_info, page_render and text_extract open a file, list pages with sizes and labels and the fonts used (including which stand-in face replaces an unembedded one), render a page to a PNG and extract text. One cited test walks open, info, text, find and render on a three-page synthetic file. Encrypted files, damaged files and large documents are not in that test."
 
 [[feature]]
 id = "misc.cli-edit"
