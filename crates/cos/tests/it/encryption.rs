@@ -572,6 +572,49 @@ fn attachment_only_protection_frees_a_page_stream_that_names_the_crypt_filter() 
     assert_eq!(content(&Document::open_with_password(Arc::new(bytes), Some("user")).unwrap()), SECRET);
 }
 
+/// An embedded file stream needs no `/Type`, or has it behind a reference: it is still the file
+/// specification's attachment, so converting to attachment-only protection keeps it encrypted
+/// even when it names the crypt filter itself.
+#[test]
+fn attachment_only_protection_finds_attachments_by_their_file_specification() {
+    for ty in [None, Some("indirect")] {
+        let mut doc = Document::open(Arc::new(fixture())).unwrap();
+        let mut d = pdfcraft_cos::Dict::new();
+        d.set(b"Filter".to_vec(), Object::name("Crypt"));
+        let mut parms = pdfcraft_cos::Dict::new();
+        parms.set(b"Name".to_vec(), Object::name("StdCF"));
+        d.set(b"DecodeParms".to_vec(), Object::Dict(parms));
+        if ty.is_some() {
+            let name = doc.add(Object::name("EmbeddedFile"));
+            d.set(b"Type".to_vec(), Object::Ref(name));
+        }
+        let stream = doc.add(Object::Stream(pdfcraft_cos::Stream::from_raw(d, ATTACHED.to_vec())));
+        let mut files = pdfcraft_cos::Dict::new();
+        files.set(b"F".to_vec(), Object::Ref(stream));
+        let mut spec = pdfcraft_cos::Dict::new();
+        spec.set(b"EF".to_vec(), Object::Dict(files));
+        let mut names = pdfcraft_cos::Dict::new();
+        names.set(b"Names".to_vec(), Object::Array(vec![Object::String(PdfString::literal(b"a.txt".to_vec())), Object::Dict(spec)]));
+        let mut root_names = pdfcraft_cos::Dict::new();
+        root_names.set(b"EmbeddedFiles".to_vec(), Object::Dict(names));
+        let root = doc.root().unwrap();
+        doc.update_dict(root, |c| c.set(b"Names".to_vec(), Object::Dict(root_names))).unwrap();
+        doc.set_attachment_encryption(&NewEncryption {
+            algorithm: Algorithm::Aes256,
+            user_password: "user",
+            owner_password: "owner",
+            permissions: -1,
+            encrypt_metadata: true,
+            seed: [7; 32],
+        })
+        .unwrap();
+        let bytes = write_full(&doc, &SaveOptions::default()).unwrap();
+        let raw = String::from_utf8_lossy(&bytes);
+        assert!(!raw.contains("ATTACHED-SECRET"), "{ty:?}: the attachment is left in clear");
+        assert!(raw.contains("Secret page"), "{ty:?}: the page stays readable");
+    }
+}
+
 #[test]
 fn encrypting_everything_still_covers_attachments() {
     let mut doc = with_attachment();
