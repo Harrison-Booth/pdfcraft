@@ -2302,7 +2302,8 @@ fn protecting_only_the_attachments_through_tools() {
     ok(&mut a, "doc_save", json!({ "doc": doc, "path": "everything.pdf" }));
     assert!(method("everything.pdf").starts_with("AES"), "without the option the whole document is encrypted");
     for compatibility in ["rc4-128", "rc4-40"] {
-        let refused = a.call("doc_protect", &json!({ "doc": doc, "open_password": "open", "attachments_only": true, "compatibility": compatibility }));
+        let refused =
+            a.call("doc_protect", &json!({ "doc": doc, "open_password": "open", "attachments_only": true, "compatibility": compatibility }));
         assert!(matches!(refused, Err(ToolError::Failed(_))), "{compatibility}: {refused:?}");
     }
 }
