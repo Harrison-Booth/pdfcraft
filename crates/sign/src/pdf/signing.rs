@@ -1,4 +1,4 @@
-use super::listing::{mk_rotation, nums, sig_fields};
+use super::listing::{DigestCache, mk_rotation, nums, sig_fields};
 use super::*;
 
 // ── signing ─────────────────────────────────────────────────────────────────────────────────
@@ -90,14 +90,28 @@ pub struct SignOptions {
 }
 
 /// A document certified "no changes" (DocMDP `/P 1`, ISO 32000-2 §12.8.2.2, Table 257) permits no
-/// further signature, so signing it would make a document that reads as modified.
+/// further signature, so signing it would make a document that reads as modified. The level is
+/// the certification signature's own, read from the revision that signature covers as the
+/// validator does: the catalog's `/Perms /DocMDP` link is not needed, and a later revision that
+/// rewrites `/P` or the link does not relax it (#1788).
 fn check_certification(doc: &Document) -> Result<(), SignError> {
-    let certified = doc
-        .root()
-        .and_then(|r| doc.get(r).as_dict().cloned())
-        .and_then(|c| c.get(b"Perms").map(|p| doc.resolve(p)).and_then(|p| p.as_dict().and_then(|p| p.get(b"DocMDP").map(|v| doc.resolve(v)))))
-        .and_then(|v| v.as_dict().and_then(|v| super::validate::docmdp(doc, v)));
-    if certified == Some(1) {
+    let bytes = doc.bytes();
+    let cache = DigestCache::default();
+    let certified = sig_fields(doc).iter().filter_map(|f| f.signature(doc)).any(|v| {
+        let range = nums(doc, &v, b"ByteRange").filter(|b| b.len() == 4 && b.iter().all(|x| x.is_finite() && *x >= 0.0));
+        let signed = range.as_ref().and_then(|b| {
+            let covered = (b[2] + b[3]) as usize;
+            if covered == 0 || covered > bytes.len() {
+                return None;
+            }
+            let old = cache.revision(doc, bytes, covered)?;
+            let level = sig_fields(&old).iter().filter_map(|f| f.signature(&old)).find(|s| nums(&old, s, b"ByteRange").as_ref() == Some(b));
+            level.map(|s| super::validate::docmdp(&old, &s))
+        });
+        // A signature whose revision can't be read keeps the level it states now.
+        signed.unwrap_or_else(|| super::validate::docmdp(doc, &v)) == Some(1)
+    });
+    if certified {
         return Err(SignError::Pdf(
             "the document was certified with no changes allowed, so it can't be signed again; ask its author for an uncertified copy".into(),
         ));
