@@ -202,6 +202,16 @@ impl EditCtx {
         }
     }
 
+    /// Under a fixed clock, ties the ids to the state of the document the edit starts from (its
+    /// size, its unsaved objects and its `/Size`): the same edit of the same file makes the same
+    /// ids in any session, and a later edit of the saved result makes different ones, so a new
+    /// annotation never repeats an earlier annotation's `/NM`.
+    pub(crate) fn bind_to_document(&mut self, doc: &pdfcraft_cos::Document) {
+        let size = doc.trailer().int(b"Size").unwrap_or(0) as u64;
+        let state = (doc.bytes().len() as u64) ^ ((doc.modified_objects().len() as u64) << 24) ^ (size << 44);
+        self.seed ^= state.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(23);
+    }
+
     /// 32 bytes of entropy for new encryption keys and salts. `RandomState` is seeded by the
     /// operating system, so no extra dependency is needed.
     fn entropy(&mut self) -> [u8; 32] {
@@ -728,6 +738,19 @@ mod reproducible_tests {
         std::thread::sleep(std::time::Duration::from_millis(2));
         let second = EditCtx::new(Some(1_700_000_000), 7, true);
         assert_eq!(first.seed, second.seed);
+        // Bound to a document, a fixed clock still separates one state of it from the next.
+        let mut doc = pdfcraft_cos::Document::open(std::sync::Arc::new(
+            b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R /Size 2 >>\n%%EOF\n".to_vec(),
+        ))
+        .unwrap();
+        let (mut one, mut again) = (EditCtx::new(Some(1_700_000_000), 0, true), EditCtx::new(Some(1_700_000_000), 0, true));
+        one.bind_to_document(&doc);
+        again.bind_to_document(&doc);
+        assert_eq!(one.seed, again.seed, "the same state makes the same ids");
+        doc.add(pdfcraft_cos::Object::Null);
+        let mut later = EditCtx::new(Some(1_700_000_000), 0, true);
+        later.bind_to_document(&doc);
+        assert_ne!(one.seed, later.seed, "a changed document makes other ids");
         // A real clock still separates sessions: its sub-second time is part of the seed.
         assert_ne!(first.seed, EditCtx::new(Some(1_700_000_000), 7, false).seed);
     }
