@@ -43,6 +43,8 @@ impl Session {
         match (self.utc_offset, self.clock) {
             (Some(zone), _) => zone(),
             (None, Some(_)) => 0,
+            // A fixed instant gets a fixed zone, so the same edits make the same file anywhere.
+            (None, None) if self.reproducible() => 0,
             (None, None) => local_utc_offset(self.now()),
         }
     }
@@ -52,12 +54,19 @@ impl Session {
         self.now().unwrap_or(0)
     }
 
+    /// The reproducible-builds convention: `SOURCE_DATE_EPOCH` fixes every stamp, so that the same
+    /// edits to the same unencrypted file save to the same bytes. An injected clock wins over it.
+    pub(crate) fn reproducible(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.clock.is_none() && source_date_epoch(std::env::var("SOURCE_DATE_EPOCH").ok().as_deref()).is_some();
+        #[cfg(target_arch = "wasm32")]
+        return false;
+    }
+
     pub(crate) fn now(&self) -> Option<i64> {
         if let Some(c) = self.clock {
             return Some(c());
         }
-        // The reproducible-builds convention: a set variable fixes every stamp, so that the
-        // same edits to the same unencrypted file save to the same bytes.
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(t) = source_date_epoch(std::env::var("SOURCE_DATE_EPOCH").ok().as_deref()) {
             return Some(t);

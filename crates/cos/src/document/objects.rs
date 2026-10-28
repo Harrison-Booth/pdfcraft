@@ -100,9 +100,10 @@ impl Document {
     }
 
     /// `true` when there are unsaved edits. Removing an `/Encrypt` dictionary written inline in
-    /// the trailer (as MuPDF writes it) changes no object, and is an edit all the same.
+    /// the trailer (as MuPDF writes it) changes no object, and is an edit all the same, as is a
+    /// pending full rewrite (a changed PDF version).
     pub fn is_modified(&self) -> bool {
-        !self.overlay.is_empty() || self.encryption_changed
+        !self.overlay.is_empty() || self.encryption_changed || self.full_save
     }
 
     /// Object numbers changed since the document was opened (or last saved).

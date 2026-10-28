@@ -13,13 +13,14 @@ impl Session {
         let now = self.now();
         let today = self.today();
         let js_off = self.js_off;
+        let reproducible = self.reproducible();
         let xfa_time_scale = self.xfa_time_scale.unwrap_or(1);
         let doc = self.doc_mut(id)?;
         doc.edit_notices.clear();
         let name = doc.name.clone();
         let is_xfa = doc.info.xfa.is_some();
         let mut scope = scope_of(&edit);
-        let mut cx = EditCtx::new(now, doc.generation ^ (id.0 << 48));
+        let mut cx = EditCtx::new(now, doc.generation ^ (id.0 << 48), reproducible);
         if !js_off {
             cx.xfa = doc.xfa_template.clone();
         }

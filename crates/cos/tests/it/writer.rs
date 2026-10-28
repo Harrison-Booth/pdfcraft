@@ -529,7 +529,7 @@ fn af_fixture() -> Vec<u8> {
 }
 
 /// Whether `holder`'s `/AF` array still holds the fixture's file spec: relationship `Data` and
-/// an embedded `<a/>` stream of type text/xml.
+/// an embedded stream of type text/xml that still holds `<a/>`.
 fn has_af(doc: &Document, holder: &Object) -> bool {
     let Some(spec) = holder
         .as_dict()
@@ -543,7 +543,8 @@ fn has_af(doc: &Document, holder: &Object) -> bool {
     let relationship = spec.get(b"AFRelationship").map(|o| doc.resolve(o));
     let file = spec.get(b"EF").map(|o| doc.resolve(o)).and_then(|ef| ef.as_dict().and_then(|d| d.get(b"F")).map(|o| doc.resolve(o)));
     matches!(relationship.as_deref().and_then(Object::as_name), Some(b"Data"))
-        && matches!(file.as_deref(), Some(Object::Stream(s)) if s.dict.get(b"Subtype").map(|o| doc.resolve(o)).and_then(|o| o.as_name().map(<[u8]>::to_vec)).as_deref() == Some(b"text/xml".as_slice()))
+        && matches!(file.as_deref(), Some(Object::Stream(s)) if s.dict.get(b"Subtype").map(|o| doc.resolve(o)).and_then(|o| o.as_name().map(<[u8]>::to_vec)).as_deref() == Some(b"text/xml".as_slice())
+            && s.decoded().ok().map(|d| d.to_vec()).as_deref() == Some(&b"<a/>"[..]))
 }
 
 fn af_survives(bytes: Vec<u8>) -> bool {
@@ -592,6 +593,7 @@ fn raising_the_version_saves_the_header_with_it() {
     doc.set_version("1.7");
     let mut doc = Document::open(Arc::new(write_incremental(&doc, &SaveOptions::default()).unwrap())).unwrap();
     doc.set_version("2.0");
+    assert!(doc.is_modified(), "a changed version is an unsaved edit");
     let saved = write_incremental(&doc, &SaveOptions::default()).unwrap();
     assert!(saved.starts_with(b"%PDF-2.0"), "an incremental save must not keep the old header under UTF-8 strings");
     assert_eq!(Document::open(Arc::new(saved)).unwrap().version(), "2.0");
