@@ -3112,7 +3112,7 @@ status = "shipped"
 commands = []
 tools = []
 evidence = ["crates/organize/src/tests.rs::layers_are_registered_with_their_default_state"]
-notes = "Layers (optional content groups) that copied pages use are added to the destination's /OCProperties and to its default configuration's /OCGs, /ON or /OFF (from the source's /D /OFF) and /Order, and extracting pages that use none adds none. Each layer is appended flat to /Order, so the source's layer-panel nesting is not kept; other configurations, radio-button groups (/RBGroups), locking and the base state are not carried. The cited test covers one hidden layer."
+notes = "Layers (optional content groups) that copied pages use are added to the destination's /OCProperties. Its /OCGs array receives the copied groups, and its default /D configuration receives /ON or /OFF (from the source's /D /OFF) and /Order. Extracting pages that use none adds none. Each layer is appended flat to /Order, so the source's layer-panel nesting is not kept; other configurations, radio-button groups (/RBGroups), locking and the base state are not carried. The cited test covers one hidden layer."
 
 [[feature]]
 id = "organize.preserve-inherited"
@@ -7445,7 +7445,7 @@ status = "shipped"
 commands = ["optimize.advanced"]
 tools = ["doc_optimize"]
 evidence = ["crates/optimize/tests/optimize.rs::discards_and_clean_up", "crates/ui-egui/tests/it/create.rs::the_pdf_optimizer_dialog_saves_an_optimized_copy"]
-notes = "Removes the catalog's /StructTreeRoot and /MarkInfo and each page's /StructParents, and is off by default. Marked-content ids in page content are not touched. Cited tests check that the tree is gone; they do not check what a tagged-PDF checker or screen reader makes of the result."
+notes = "Removes the catalog's /StructTreeRoot and /MarkInfo and each page's /StructParents, and is off by default. A document with no /StructTreeRoot is left as it is: its /MarkInfo and page /StructParents stay. Marked-content ids in page content are not touched. Cited tests check that the tree is gone; they do not check what a tagged-PDF checker or screen reader makes of the result."
 
 [[feature]]
 id = "optimize.discard-bookmarks"
@@ -7541,7 +7541,7 @@ status = "shipped"
 commands = ["optimize.advanced"]
 tools = ["doc_optimize"]
 evidence = ["crates/automation/tests/it/automation.rs::optimizing_through_tools", "crates/ui-egui/tests/it/create.rs::the_pdf_optimizer_dialog_saves_an_optimized_copy"]
-notes = "Runs through Remove Hidden Information's Metadata category: removes the trailer's /Info and /Metadata (XMP) streams wherever an object owns one. Cited tests check the optimizer path, not each owner of XMP (image, font, form). The document gets a full rewrite, so the file's earlier revisions are not kept."
+notes = "Runs through Remove Hidden Information's Metadata category: removes the trailer's /Info and the /Metadata (XMP) streams of objects reachable from the catalog that own one; an unreachable object that owns either is not covered. Cited tests check the optimizer path, not each owner of XMP (image, font, form). The document gets a full rewrite, so the file's earlier revisions are not kept."
 
 [[feature]]
 id = "optimize.discard-attachments"
@@ -7565,7 +7565,7 @@ status = "shipped"
 commands = ["optimize.advanced"]
 tools = ["doc_optimize"]
 evidence = ["crates/redact/src/tests.rs::hidden_information_is_counted_and_removed", "crates/automation/tests/it/automation.rs::optimizing_through_tools"]
-notes = "Runs through Remove Hidden Information's Private data category: removes /PieceInfo from every object that owns it, the catalog and pages included. Other producers' private keys that are not /PieceInfo stay."
+notes = "Runs through Remove Hidden Information's Private data category: removes /PieceInfo from the objects reachable from the catalog that own it, the catalog and pages included; an unreachable object keeps its /PieceInfo. Other producers' private keys that are not /PieceInfo stay."
 
 [[feature]]
 id = "optimize.discard-external-refs"
