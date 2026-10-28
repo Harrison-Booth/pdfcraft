@@ -20,7 +20,7 @@ impl Session {
         let name = doc.name.clone();
         let is_xfa = doc.info.xfa.is_some();
         let mut scope = scope_of(&edit);
-        let mut cx = EditCtx::new(now, doc.generation ^ (id.0 << 48), reproducible);
+        let mut cx = EditCtx::new(now, if reproducible { 0 } else { doc.generation ^ (id.0 << 48) }, reproducible);
         if !js_off {
             cx.xfa = doc.xfa_template.clone();
         }
@@ -53,6 +53,9 @@ impl Session {
         // Nothing to bake: leave undo history and the dirty flag alone.
         if matches!(&edit, Edit::FlattenFillSign) && !pdfcraft_annot::has_visible_fill_sign(&editor.cos) {
             return Ok(());
+        }
+        if reproducible {
+            cx.bind_to_document(&editor.cos);
         }
         let mut next = editor.cos.clone();
         if !js_off && uses_scripts(&edit) {
