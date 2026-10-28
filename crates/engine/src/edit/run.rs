@@ -162,6 +162,8 @@ pub(crate) struct EditCtx {
     /// Today in local time, for date tokens.
     pub(crate) today: (i64, u32, u32),
     pub(crate) seed: u64,
+    /// The clock is fixed (`SOURCE_DATE_EPOCH`).
+    reproducible: bool,
     pub(crate) count: u64,
     /// Fields the edit renamed to keep imported names separate (old → new), for the repair
     /// log and the undo label.
@@ -196,6 +198,7 @@ impl EditCtx {
             date: now.map(pdfcraft_cos::pdf_date),
             today: (1970, 1, 1),
             seed,
+            reproducible,
             count: 0,
             renamed_fields: Vec::new(),
             redaction_overlays: Vec::new(),
@@ -207,6 +210,9 @@ impl EditCtx {
     /// ids in any session, and a later edit of the saved result makes different ones, so a new
     /// annotation never repeats an earlier annotation's `/NM`.
     pub(crate) fn bind_to_document(&mut self, doc: &pdfcraft_cos::Document) {
+        if !self.reproducible {
+            return;
+        }
         let size = doc.trailer().int(b"Size").unwrap_or(0) as u64;
         let state = (doc.bytes().len() as u64) ^ ((doc.modified_objects().len() as u64) << 24) ^ (size << 44);
         self.seed ^= state.wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(23);
