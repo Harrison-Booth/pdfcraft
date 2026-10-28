@@ -299,7 +299,8 @@ fn rename_field(doc: &mut Document, all: &[Field], f: &Field, name: &str, props:
             if child_named(doc, af, parent, n).is_some_and(|r| r != f.obj) {
                 return invalid(format!("a field named {new_name:?} already exists"));
             }
-            doc.update_dict(f.obj, |d| d.set(b"T".to_vec(), doc.text_string(n)))?;
+            let own = doc.text_string(n);
+            doc.update_dict(f.obj, |d| d.set(b"T".to_vec(), own))?;
         }
         // Calculations read the field by its new name, unless another field keeps the old one.
         if all.iter().filter(|x| x.name == f.name).count() == 1 {

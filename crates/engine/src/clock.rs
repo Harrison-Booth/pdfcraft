@@ -4,15 +4,15 @@ pub(crate) fn local_utc_offset(at: Option<i64>) -> i64 {
     #[cfg(not(target_arch = "wasm32"))]
     {
         use chrono::{Local, TimeZone};
-        return match at.and_then(|t| Local.timestamp_opt(t, 0).single()) {
+        match at.and_then(|t| Local.timestamp_opt(t, 0).single()) {
             Some(t) => i64::from(t.offset().local_minus_utc()),
             None => i64::from(Local::now().offset().local_minus_utc()),
-        };
+        }
     }
     #[cfg(target_arch = "wasm32")]
     {
         let _ = at;
-        return 0;
+        0
     }
 }
 
