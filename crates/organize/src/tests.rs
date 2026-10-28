@@ -3771,7 +3771,12 @@ fn bookmark_style_and_colour_are_set_as_the_table_says() {
 /// Gives the fixture a PDF 2.0 document part tree (`/DPartRoot`, ISO 32000-2 14.12) that starts
 /// at its first page, and a structure tree root listing a structure namespace (14.7.4).
 fn with_document_parts_and_namespaces() -> Document {
-    let mut doc = open(fixture());
+    // PDF 2.0, the version these structures belong to.
+    let mut bytes = fixture();
+    let header = bytes.get_mut(..8).expect("the fixture starts with its header");
+    assert!(header.starts_with(b"%PDF-1."));
+    header.copy_from_slice(b"%PDF-2.0");
+    let mut doc = open(bytes);
     let first = pages(&doc).unwrap()[0].obj;
     let mut namespace = pdfcraft_cos::Dict::new();
     namespace.set(b"Type".to_vec(), Object::name("Namespace"));
@@ -3808,6 +3813,8 @@ fn assert_document_parts_and_namespaces_kept(doc: &Document, what: &str) {
     let namespaces = doc.resolve(tree.as_dict().unwrap().get(b"Namespaces").unwrap_or_else(|| panic!("{what}: /Namespaces dropped")));
     let namespace = doc.resolve(&namespaces.as_array().unwrap()[0]);
     assert_eq!(namespace.as_dict().unwrap().name(b"Type"), Some(&b"Namespace"[..]), "{what}");
+    assert_eq!(namespace.as_dict().unwrap().get(b"NS").unwrap().as_string().unwrap().bytes, b"http://iso.org/pdf2/ssn", "{what}: /NS changed");
+    assert_eq!(doc.version(), "2.0", "{what}: the PDF 2.0 version is kept");
 }
 
 #[test]

@@ -541,7 +541,13 @@ fn assert_dpart_and_namespaces(doc: &Document) {
     let node = doc.resolve(root.get(b"DPartRootNode").expect("/DPartRootNode kept"));
     let node = node.as_dict().unwrap();
     assert_eq!(node.name(b"Type"), Some(&b"DPart"[..]));
-    assert!(node.reference(b"Start").is_some(), "the part still starts at a page");
+    // Both ends of the part are still the one page, found through /Pages (references are
+    // renumbered by a full save, so they are compared inside this document).
+    let pages = doc.resolve(catalog.get(b"Pages").unwrap());
+    let kids = pages.as_dict().unwrap().get(b"Kids").unwrap().as_array().unwrap();
+    let page = kids.first().and_then(|k| k.as_ref()).expect("the page is still the first kid");
+    assert_eq!(node.reference(b"Start"), Some(page), "the part still starts at its page");
+    assert_eq!(node.reference(b"End"), Some(page), "the part still ends at its page");
     assert!(doc.resolve(node.get(b"DPM").unwrap()).as_dict().unwrap().get(b"Kind").is_some());
     let tree = doc.resolve(catalog.get(b"StructTreeRoot").unwrap());
     let namespaces = doc.resolve(tree.as_dict().unwrap().get(b"Namespaces").expect("/Namespaces kept"));
