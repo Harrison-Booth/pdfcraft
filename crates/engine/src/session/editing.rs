@@ -54,9 +54,7 @@ impl Session {
         if matches!(&edit, Edit::FlattenFillSign) && !pdfcraft_annot::has_visible_fill_sign(&editor.cos) {
             return Ok(());
         }
-        if reproducible {
-            cx.bind_to_document(&editor.cos);
-        }
+        cx.bind_to_document(&editor.cos);
         let mut next = editor.cos.clone();
         if !js_off && uses_scripts(&edit) {
             cx.js = Some(js::JsRunner::new(&next, &name));
