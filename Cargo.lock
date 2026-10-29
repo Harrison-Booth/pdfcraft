@@ -8359,9 +8359,11 @@ dependencies = [
  "pdfcraft-cos",
  "pdfcraft-oracle",
  "png 0.18.1",
+ "proc-macro2",
  "serde",
  "serde_json",
  "sha2 0.11.1",
+ "syn 2.0.119",
  "toml",
 ]
 
