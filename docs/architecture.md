@@ -109,6 +109,11 @@ sweep over the pinned pdf.js corpus), `xtask text-oracle` (word F1 and reading o
 `xtask demo-pdf`, `xtask screenshots`, `xtask models` (OCR models), `xtask version`. Releases are
 built by `.github/workflows/release.yml` ([releasing.md](releasing.md)).
 
+For parity evidence, `xtask parity` verifies that each cited `path.rs::function` is a Rust function
+marked with a recognized test attribute (`#[test]`, `#[tokio::test]`, or `#[rstest]`), including
+`#[test]` functions declared inside `proptest!` blocks. This is a source check: it does not run the
+test, verify its assertions, or establish that the cited test covers the feature claim.
+
 ## Revision history
 
 | Date | Change | Summary |
