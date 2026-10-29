@@ -1,28 +1,86 @@
 use super::document::{field_object, get_field, get_nth_field_name, noop, num_fields, page_num_get, page_num_set, print, reset_form, submit_form};
 use super::format::{printd, printf, printx, scand};
-use super::host::{arg, function, host, s, text, text_line};
+use super::host::{arg, error, function, host, read, s, strings, text, text_line};
 use super::model::{DISPLAY_HIDDEN, DISPLAY_NO_PRINT, DISPLAY_NO_VIEW, DISPLAY_VISIBLE, Event, Panel, Request};
-use super::{Attribute, Context, JsArray, JsObject, JsResult, JsString, JsValue, NativeFunction, ObjectInitializer, js_string};
+use super::{
+    Arc, Attribute, Context, JsArray, JsObject, JsResult, JsString, JsValue, Message, MessageButtons, MessageIcon, NativeFunction, ObjectInitializer,
+    Source, js_string,
+};
 
 // ── app, util, console ──────────────────────────────────────────────────────────────────────
 
 /// A message argument: a string, or an object with `cMsg`, cut to a message's length.
 fn message(v: &JsValue, key: &str, ctx: &mut Context) -> JsResult<String> {
-    match v.as_object() {
-        Some(o) if !o.is_array() && !o.is_callable() => {
+    match named_params(v, key, ctx)? {
+        Some(o) => {
             let m = o.get(JsString::from(key), ctx)?;
             text_line(&m, ctx)
         }
-        _ => text_line(v, ctx),
+        None => text_line(v, ctx),
     }
 }
 
-/// `app.alert(cMsg)`: records the message, given as a string or as an object with `cMsg`, and
-/// returns 1 (the OK button).
+/// `v` as a method's single object of named parameters: an object (not an array or function)
+/// that has `key`, the parameter every such call names. Any other value, a `new String(…)` or a
+/// caught `Error` included, is the first positional argument, read as text.
+fn named_params(v: &JsValue, key: &str, ctx: &mut Context) -> JsResult<Option<JsObject>> {
+    match v.as_object() {
+        Some(o) if !o.is_array() && !o.is_callable() && o.has_property(JsString::from(key), ctx)? => Ok(Some(o.clone())),
+        _ => Ok(None),
+    }
+}
+
+/// A message's title: `v` as text cut to a message's length, `None` when it is missing or empty.
+fn title(v: &JsValue, ctx: &mut Context) -> JsResult<Option<String>> {
+    Ok(Some(text_line(v, ctx)?).filter(|t| !t.is_empty()))
+}
+
+/// An icon or buttons number: `v` as a number, `None` when it is missing or isn't one (a value
+/// that can't be converted counts as missing, so a bad argument never stops the message).
+fn code(v: &JsValue, ctx: &mut Context) -> Option<f64> {
+    if v.is_undefined() || v.is_null() {
+        return None;
+    }
+    v.to_number(ctx).ok()
+}
+
+/// `app.alert`'s message: `(cMsg, nIcon, nType, cTitle)`, or one object with those keys (as
+/// the JavaScript for Acrobat API Reference allows for every method with named parameters).
+pub(crate) fn alert_message(args: &[JsValue], ctx: &mut Context) -> JsResult<Message> {
+    let first = arg(args, 0);
+    let (text, icon, buttons, t) = match named_params(&first, "cMsg", ctx)? {
+        Some(o) => {
+            let get = |k: &str, ctx: &mut Context| o.get(JsString::from(k), ctx);
+            (get("cMsg", ctx)?, get("nIcon", ctx)?, get("nType", ctx)?, get("cTitle", ctx)?)
+        }
+        None => (first, arg(args, 1), arg(args, 2), arg(args, 3)),
+    };
+    Ok(Message {
+        text: text_line(&text, ctx)?,
+        title: title(&t, ctx)?,
+        icon: MessageIcon::from_code(code(&icon, ctx)),
+        buttons: MessageButtons::from_code(code(&buttons, ctx)),
+    })
+}
+
+/// `xfa.host.messageBox`'s message: `(message, title, icon, buttons)`, as the XFA
+/// specification orders them.
+pub(crate) fn message_box_message(args: &[JsValue], ctx: &mut Context) -> JsResult<Message> {
+    Ok(Message {
+        text: text_line(&arg(args, 0), ctx)?,
+        title: title(&arg(args, 1), ctx)?,
+        icon: MessageIcon::from_code(code(&arg(args, 2), ctx)),
+        buttons: MessageButtons::from_code(code(&arg(args, 3), ctx)),
+    })
+}
+
+/// `app.alert(cMsg, nIcon, nType, cTitle)`: records the message with its title, icon and buttons,
+/// given in that order or as one object with those keys, and returns 1 (the OK button).
 fn alert(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
-    let m = message(&arg(args, 0), "cMsg", ctx)?;
+    let m = alert_message(args, ctx)?;
     host(ctx)?.borrow_mut().alert(m);
-    // The OK button.
+    // Always the OK button for now: the viewer can't ask the user and run the script on with
+    // the answer yet (#4291).
     Ok(JsValue::from(1))
 }
 
@@ -85,6 +143,84 @@ fn console_clear(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsVa
     Ok(JsValue::undefined())
 }
 
+/// Recalculate fields in the document's `/CO` order against the writes already made by this
+/// script. A small depth cap stops calculate scripts from recursing forever.
+fn calculate_now(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
+    const MAX_CALCULATE_DEPTH: usize = 8;
+    let calculations = {
+        let shared = host(ctx)?;
+        let mut h = shared.borrow_mut();
+        if h.calculate_depth >= MAX_CALCULATE_DEPTH {
+            return Err(error("calculateNow recursion limit exceeded"));
+        }
+        h.calculate_depth += 1;
+        h.calculations.clone()
+    };
+    let previous_event = match ctx.global_object().get(js_string!("event"), ctx) {
+        Ok(event) => event,
+        Err(error) => {
+            if let Ok(shared) = host(ctx) {
+                let mut h = shared.borrow_mut();
+                h.calculate_depth = h.calculate_depth.saturating_sub(1);
+            }
+            return Err(error);
+        }
+    };
+    let result = (|| {
+        for (name, script) in calculations {
+            let Some(field) = host(ctx)?.borrow().fields.iter().find(|f| f.name == name).cloned() else { continue };
+            if let Some(why) = super::run::refuse(&script) {
+                return Err(error(why));
+            }
+            let event = Event::field("Calculate", &name, &field.value.first().cloned().unwrap_or_default());
+            let object = event_object(ctx, &event);
+            ctx.global_object().set(js_string!("event"), object.clone(), true, ctx)?;
+            ctx.eval(Source::from_bytes(&script))?;
+            let rc = object.get(js_string!("rc"), ctx)?;
+            if !rc.to_boolean() {
+                continue;
+            }
+            let value = object.get(js_string!("value"), ctx)?;
+            let value = text(&value, ctx)?;
+            let shared = host(ctx)?;
+            let mut h = shared.borrow_mut();
+            if let Some((index, _)) = h.fields.iter().enumerate().find(|(_, f)| f.name == name) {
+                let target = Arc::make_mut(&mut h.fields).get_mut(index).ok_or_else(|| error("the field is no longer available"))?;
+                target.value = vec![value];
+                h.changed.insert(index);
+            }
+        }
+        Ok(JsValue::undefined())
+    })();
+    let restored = ctx.global_object().set(js_string!("event"), previous_event, true, ctx).map(|_| JsValue::undefined());
+    if let Ok(shared) = host(ctx) {
+        let mut h = shared.borrow_mut();
+        h.calculate_depth = h.calculate_depth.saturating_sub(1);
+    }
+    result.and(restored)
+}
+
+/// Acrobat's built-in calculation helper, used by the scripts written by its Calculate tab.
+fn af_simple_calculate(_: &JsValue, args: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
+    let op = text(&arg(args, 0), ctx)?;
+    let names = strings(&arg(args, 1), ctx)?;
+    let mut values = Vec::new();
+    for name in names {
+        let field = read(ctx, &JsString::from(name))?;
+        values.extend(field.value.iter().map(|v| super::host::as_number(v).unwrap_or(0.0)));
+    }
+    let result = match op.as_str() {
+        "SUM" => values.iter().sum(),
+        "PRD" => values.iter().product(),
+        "AVG" if values.is_empty() => 0.0,
+        "AVG" => values.iter().sum::<f64>() / values.len() as f64,
+        "MIN" => values.iter().copied().reduce(f64::min).unwrap_or(0.0),
+        "MAX" => values.iter().copied().reduce(f64::max).unwrap_or(0.0),
+        _ => 0.0,
+    };
+    Ok(s(&if result.is_finite() { result.to_string() } else { "0".into() }))
+}
+
 fn timer(_: &JsValue, _: &[JsValue], ctx: &mut Context) -> JsResult<JsValue> {
     // Timers never fire in the sandbox; scripts get an object they can pass to clear*.
     Ok(ObjectInitializer::new(ctx).build().into())
@@ -123,14 +259,15 @@ const XFA_VERSION: f64 = 3.5;
 /// `documentFileName`, `info`, the XFA version), and the `app`, `util`, `console`, `display` and
 /// `color` objects.
 pub(crate) fn install(ctx: &mut Context) -> JsResult<()> {
-    let globals: [(&str, usize, NativeFunction); 9] = [
+    let globals: [(&str, usize, NativeFunction); 10] = [
         ("getField", 1, NativeFunction::from_fn_ptr(get_field)),
         ("getNthFieldName", 1, NativeFunction::from_fn_ptr(get_nth_field_name)),
         ("resetForm", 1, NativeFunction::from_fn_ptr(reset_form)),
         ("print", 1, NativeFunction::from_fn_ptr(print)),
         ("submitForm", 1, NativeFunction::from_fn_ptr(submit_form)),
         ("mailDoc", 1, NativeFunction::from_fn_ptr(noop)),
-        ("calculateNow", 0, NativeFunction::from_fn_ptr(noop)),
+        ("calculateNow", 0, NativeFunction::from_fn_ptr(calculate_now)),
+        ("AFSimple_Calculate", 2, NativeFunction::from_fn_ptr(af_simple_calculate)),
         ("syncAnnotScan", 0, NativeFunction::from_fn_ptr(noop)),
         ("dirty", 0, NativeFunction::from_fn_ptr(noop)),
     ];
