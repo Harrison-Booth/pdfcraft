@@ -76,6 +76,22 @@ pub(crate) fn field_object(ctx: &mut Context, name: &str) -> JsObject {
     };
     let num_items = getter!(ctx, n, |f, _c| JsValue::from(f.options.len() as f64));
     let char_limit = getter!(ctx, n, |f, _c| JsValue::from(f.char_limit.unwrap_or(0) as f64));
+    let char_limit_set = {
+        fn set(_: &JsValue, args: &[JsValue], name: &JsString, c: &mut Context) -> JsResult<JsValue> {
+            let f = read(c, name)?;
+            if f.kind != FieldType::Text {
+                return Err(error("charLimit applies only to text fields"));
+            }
+            let n = arg(args, 0).to_number(c)?;
+            if !n.is_finite() || n < 0.0 || n.fract() != 0.0 || n > i32::MAX as f64 {
+                return Err(error("charLimit must be an integer from 0 to 2147483647"));
+            }
+            let limit = (n > 0.0).then_some(n as usize);
+            write(c, name, |f| f.char_limit = limit)?;
+            Ok(JsValue::undefined())
+        }
+        function(ctx, NativeFunction::from_copy_closure_with_captures(set, n.clone()))
+    };
     let export_values = getter!(ctx, n, |f, c| {
         let vals: Vec<JsValue> = f.options.iter().map(|o| s(&o.0)).collect();
         JsArray::from_iter(vals, c).into()
@@ -195,7 +211,7 @@ pub(crate) fn field_object(ctx: &mut Context, name: &str) -> JsObject {
         .accessor(js_string!("display"), Some(display_get), Some(display_set), rw)
         .accessor(js_string!("hidden"), Some(hidden_get), Some(hidden_set), rw)
         .accessor(js_string!("numItems"), Some(num_items), None, rw)
-        .accessor(js_string!("charLimit"), Some(char_limit), None, rw)
+        .accessor(js_string!("charLimit"), Some(char_limit), Some(char_limit_set), rw)
         .accessor(js_string!("exportValues"), Some(export_values), None, rw)
         .accessor(js_string!("currentValueIndices"), Some(indices), Some(indices_set), rw)
         .accessor(js_string!("textColor"), Some(text_color_get), Some(text_color_set), rw)

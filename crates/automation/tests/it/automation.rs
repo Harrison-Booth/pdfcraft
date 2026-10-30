@@ -10254,3 +10254,22 @@ fn javascript_default_value_persists_and_resets_through_tools() {
     ok(&mut a, "form_reset", json!({ "doc": reopened }));
     assert_eq!(ok(&mut a, "form_fields", json!({ "doc": reopened }))["fields"][0]["value"], "9");
 }
+
+#[test]
+fn javascript_char_limit_persists_and_is_enforced_through_tools() {
+    let dir = workdir("js-char-limit");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "form_add_field", json!({ "doc": doc, "page": 1, "type": "text", "rect": [20, 20, 180, 42], "name": "Qty" }));
+    let result = ok(&mut a, "js_run", json!({ "doc": doc, "script": "getField('Qty').charLimit=3; console.println(getField('Qty').charLimit)" }));
+    assert_eq!(result["console"][0], "3");
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "Qty": "123" } }));
+    assert!(a.call("form_fill", &json!({ "doc": doc, "values": { "Qty": "1234" } })).is_err());
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "limit.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "limit.pdf" }))["doc"].as_u64().unwrap();
+    let readback = ok(&mut a, "js_run", json!({ "doc": reopened, "script": "console.println(getField('Qty').charLimit)" }));
+    assert_eq!(readback["console"][0], "3");
+    ok(&mut a, "js_run", json!({ "doc": reopened, "script": "getField('Qty').charLimit=0" }));
+    let cleared = ok(&mut a, "js_run", json!({ "doc": reopened, "script": "console.println(getField('Qty').charLimit)" }));
+    assert_eq!(cleared["console"][0], "0");
+}

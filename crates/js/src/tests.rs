@@ -2082,3 +2082,22 @@ fn default_value_setter_is_live() {
     assert_eq!(o.value, "9");
     assert_eq!(o.changed.iter().find(|f| f.name == "qty").unwrap().default, ["9"]);
 }
+
+#[test]
+fn char_limit_setter_is_bounded_and_text_only() {
+    let o = go("var q=getField('qty'); q.charLimit=3; event.value=getField('qty').charLimit;", &Event::doc("Open"));
+    assert_eq!(o.error, None);
+    assert_eq!(o.value, "3");
+    assert_eq!(o.changed.iter().find(|f| f.name == "qty").unwrap().char_limit, Some(3));
+    for script in [
+        "getField('qty').charLimit=-1",
+        "getField('qty').charLimit=1.5",
+        "getField('qty').charLimit=NaN",
+        "getField('qty').charLimit=1e100",
+        "getField('size').charLimit=3",
+    ] {
+        let rejected = go(script, &Event::doc("Open"));
+        assert!(rejected.error.is_some(), "accepted {script}");
+        assert!(rejected.changed.is_empty(), "mutated on refusal: {script}");
+    }
+}

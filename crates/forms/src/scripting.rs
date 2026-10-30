@@ -43,6 +43,7 @@ pub struct FieldChange {
     /// `display.visible` 0, `hidden` 1, `noPrint` 2, `noView` 3.
     pub display: Option<i32>,
     pub default_value: Option<Option<String>>,
+    pub max_len: Option<Option<usize>>,
 }
 
 /// What a script did.
@@ -152,8 +153,8 @@ pub(crate) fn apply_changes(doc: &mut Document, changes: &[FieldChange], except:
                 }
             }
         }
-        if c.default_value.is_some() {
-            crate::set_props(doc, &c.name, &crate::FieldProps { default_value: c.default_value.clone(), ..Default::default() })?;
+        if c.default_value.is_some() || c.max_len.is_some() {
+            crate::set_props(doc, &c.name, &crate::FieldProps { default_value: c.default_value.clone(), max_len: c.max_len, ..Default::default() })?;
         }
     }
     Ok(())
