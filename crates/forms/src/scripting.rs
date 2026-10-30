@@ -62,14 +62,14 @@ pub struct ScriptResult {
 /// Runs field scripts (JavaScript).
 pub trait Scripts {
     /// Run `script` for `event` on `target`, whose value is `value`; `fields` is the whole form.
-    fn run(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field]) -> ScriptResult;
+    fn run(&mut self, event: FieldEvent, script: &str, target: &Field, value: &str, fields: &[Field], doc: &Document) -> ScriptResult;
 }
 
 /// No script engine (or JavaScript turned off): scripts change nothing.
 pub struct NoScripts;
 
 impl Scripts for NoScripts {
-    fn run(&mut self, _: FieldEvent, _: &str, _: &Field, value: &str, _: &[Field]) -> ScriptResult {
+    fn run(&mut self, _: FieldEvent, _: &str, _: &Field, value: &str, _: &[Field], _: &Document) -> ScriptResult {
         ScriptResult { rc: true, value: value.to_string(), changes: Vec::new(), message: None }
     }
 }
@@ -84,7 +84,7 @@ pub(crate) fn accept(doc: &mut Document, f: &Field, value: &str, scripts: &mut d
     ] {
         let Some(js) = script else { continue };
         let all = fields(doc);
-        let r = scripts.run(event, js, f, &v, &all);
+        let r = scripts.run(event, js, f, &v, &all, doc);
         apply_changes(doc, &r.changes, &f.name)?;
         if !r.rc {
             return Err(FormError::Invalid(r.message.unwrap_or_else(|| format!("{default} [ {} ]", f.name))));
@@ -97,7 +97,7 @@ pub(crate) fn accept(doc: &mut Document, f: &Field, value: &str, scripts: &mut d
 /// The text a custom Format script shows for `value`, if the field has one.
 pub(crate) fn formatted(doc: &Document, f: &Field, value: &str, scripts: &mut dyn Scripts) -> Option<String> {
     let js = f.actions.scripts.format.as_ref()?;
-    let r = scripts.run(FieldEvent::Format, js, f, value, &fields(doc));
+    let r = scripts.run(FieldEvent::Format, js, f, value, &fields(doc), doc);
     Some(r.value)
 }
 

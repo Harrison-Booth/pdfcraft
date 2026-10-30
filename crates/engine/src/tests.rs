@@ -8903,36 +8903,49 @@ fn dynamic_calculation_reads_and_side_effects_reach_later_fields() {
 }
 
 #[test]
-fn scripted_display_changes_survive_warm_cache_and_new_edit() {
+fn field_scripts_read_current_appearance_during_an_edit() {
     use pdfcraft_forms::{FieldEvent, Scripts};
     let mut cos = pdfcraft_cos::Document::open(Arc::new(synthetic_acroform(2, 0))).unwrap();
     for (display, flags) in [(1, 6), (3, 36), (2, 0), (0, 4)] {
         let fields = pdfcraft_forms::fields(&cos);
-        let target = fields.iter().find(|f| f.name == "ranks").unwrap();
-        let other = fields.iter().find(|f| f.name == "trained").unwrap();
+        let target = fields.iter().find(|f| f.name == "trained").unwrap();
+        let other = fields.iter().find(|f| f.name == "ranks").unwrap();
         let old_display = crate::js::field_state(&cos, other).display;
         let mut runner = crate::js::JsRunner::new(&cos, "synthetic.pdf");
-        // Populate the display cache before a script writes the same field.
-        let warm = runner.run(FieldEvent::Calculate, "event.value = getField('trained').display;", target, "", &fields);
+        // Populate script state before a script writes the same field.
+        let warm = runner.run(FieldEvent::Calculate, "event.value = getField('ranks').display;", target, "", &fields, &cos);
         assert_eq!(warm.value, old_display.to_string());
         let result = runner.run(
             FieldEvent::Calculate,
-            &format!("getField('trained').display = {display}; event.value = getField('trained').display;"),
+            &format!("getField('ranks').display = {display}; event.value = getField('ranks').display;"),
             target,
             "",
             &fields,
+            &cos,
         );
         assert_eq!(result.value, display.to_string());
         assert_eq!(result.changes.len(), 1);
         assert_eq!(result.changes.first().unwrap().display, Some(display));
         pdfcraft_forms::apply_script_changes(&mut cos, &result.changes, &mut pdfcraft_forms::NoScripts).unwrap();
         assert_eq!(cos.get(other.widgets.first().unwrap().obj).as_dict().unwrap().int(b"F").unwrap() & 38, flags);
-        // Within an edit the original implementation reads an immutable pre-edit COS snapshot.
-        let same_edit = runner.run(FieldEvent::Calculate, "event.value = getField('trained').display;", target, "", &fields);
-        assert_eq!(same_edit.value, old_display.to_string());
-        // The next edit must rebuild its cache from the newly written annotation flags.
+        pdfcraft_forms::apply_script_changes(
+            &mut cos,
+            &[pdfcraft_forms::FieldChange {
+                name: "ranks".into(),
+                fill_color: Some(vec!["RGB".into(), "0".into(), "1".into(), "0".into()]),
+                ..Default::default()
+            }],
+            &mut pdfcraft_forms::NoScripts,
+        )
+        .unwrap();
+        // A later script in this edit sees the document after the earlier appearance change.
+        let same_edit = runner.run(FieldEvent::Calculate, "event.value = getField('ranks').display;", target, "", &fields, &cos);
+        assert_eq!(same_edit.value, display.to_string());
+        let same_edit_color = runner.run(FieldEvent::Calculate, "event.value = getField('ranks').fillColor.join(',');", target, "", &fields, &cos);
+        assert_eq!(same_edit_color.value, "RGB,0,1,0");
+        // A new runner sees the same current appearance.
         let mut next = crate::js::JsRunner::new(&cos, "synthetic.pdf");
-        let read = next.run(FieldEvent::Calculate, "event.value = getField('trained').display;", target, "", &pdfcraft_forms::fields(&cos));
+        let read = next.run(FieldEvent::Calculate, "event.value = getField('ranks').display;", target, "", &pdfcraft_forms::fields(&cos), &cos);
         assert_eq!(read.value, display.to_string());
         assert!(read.changes.is_empty());
         assert!(runner.output.errors.is_empty());
