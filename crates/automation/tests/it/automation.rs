@@ -10232,3 +10232,25 @@ fn javascript_current_value_indices_persist_through_tools() {
     );
     assert_eq!(readback["console"][0], "2|0,2");
 }
+
+#[test]
+fn javascript_default_value_persists_and_resets_through_tools() {
+    let dir = workdir("js-default-value");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "form_add_field", json!({ "doc": doc, "page": 1, "type": "text", "rect": [20, 20, 180, 42], "name": "Qty" }));
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "Qty": "4" } }));
+    let result = ok(
+        &mut a,
+        "js_run",
+        json!({ "doc": doc, "script": "getField('Qty').defaultValue='9'; console.println(getField('Qty').defaultValue+'|'+getField('Qty').value)" }),
+    );
+    assert_eq!(result["console"][0], "9|4");
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "default.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "default.pdf" }))["doc"].as_u64().unwrap();
+    let readback =
+        ok(&mut a, "js_run", json!({ "doc": reopened, "script": "console.println(getField('Qty').defaultValue+'|'+getField('Qty').value)" }));
+    assert_eq!(readback["console"][0], "9|4");
+    ok(&mut a, "form_reset", json!({ "doc": reopened }));
+    assert_eq!(ok(&mut a, "form_fields", json!({ "doc": reopened }))["fields"][0]["value"], "9");
+}

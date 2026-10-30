@@ -28,6 +28,14 @@ pub(crate) fn field_object(ctx: &mut Context, name: &str) -> JsObject {
         _ => f.value.join(","),
     }));
     let default = getter!(ctx, n, |f, _c| s(&f.default.first().cloned().unwrap_or_default()));
+    let default_set = {
+        fn set(_: &JsValue, args: &[JsValue], name: &JsString, c: &mut Context) -> JsResult<JsValue> {
+            let v = text(&arg(args, 0), c)?;
+            write(c, name, |f| f.default = vec![v])?;
+            Ok(JsValue::undefined())
+        }
+        function(ctx, NativeFunction::from_copy_closure_with_captures(set, n.clone()))
+    };
     let kind = getter!(ctx, n, |f, _c| s(f.kind.name()));
     let fname = getter!(ctx, n, |f, _c| s(&f.name));
     let readonly_get = getter!(ctx, n, |f, _c| JsValue::from(f.readonly));
@@ -179,7 +187,7 @@ pub(crate) fn field_object(ctx: &mut Context, name: &str) -> JsObject {
     ObjectInitializer::new(ctx)
         .accessor(js_string!("value"), Some(value_get), Some(value_set), rw)
         .accessor(js_string!("valueAsString"), Some(as_string), None, rw)
-        .accessor(js_string!("defaultValue"), Some(default), None, rw)
+        .accessor(js_string!("defaultValue"), Some(default), Some(default_set), rw)
         .accessor(js_string!("type"), Some(kind), None, rw)
         .accessor(js_string!("name"), Some(fname), None, rw)
         .accessor(js_string!("readonly"), Some(readonly_get), Some(readonly_set), rw)

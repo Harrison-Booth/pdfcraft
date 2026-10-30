@@ -147,8 +147,9 @@ fn changes(before: &[pdfcraft_js::FieldState], after: &[pdfcraft_js::FieldState]
                 read_only: (a.readonly != b.readonly).then_some(a.readonly),
                 required: (a.required != b.required).then_some(a.required),
                 display: (a.display != b.display).then_some(a.display),
+                default_value: (a.default != b.default).then(|| a.default.first().cloned()),
             };
-            (c.value.is_some() || c.read_only.is_some() || c.required.is_some() || c.display.is_some()).then_some(c)
+            (c.value.is_some() || c.read_only.is_some() || c.required.is_some() || c.display.is_some() || c.default_value.is_some()).then_some(c)
         })
         .collect()
 }

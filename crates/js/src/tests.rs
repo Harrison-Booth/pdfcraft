@@ -2074,3 +2074,11 @@ fn field_choice_index_setter_maps_options_and_rejects_bad_indices() {
         assert!(rejected.changed.is_empty(), "mutated on refusal: {script}");
     }
 }
+
+#[test]
+fn default_value_setter_is_live() {
+    let o = go("var q=getField('qty'); q.defaultValue='9'; event.value=getField('qty').defaultValue;", &Event::doc("Open"));
+    assert_eq!(o.error, None);
+    assert_eq!(o.value, "9");
+    assert_eq!(o.changed.iter().find(|f| f.name == "qty").unwrap().default, ["9"]);
+}

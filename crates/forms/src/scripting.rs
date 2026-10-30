@@ -42,6 +42,7 @@ pub struct FieldChange {
     pub required: Option<bool>,
     /// `display.visible` 0, `hidden` 1, `noPrint` 2, `noView` 3.
     pub display: Option<i32>,
+    pub default_value: Option<Option<String>>,
 }
 
 /// What a script did.
@@ -150,6 +151,9 @@ pub(crate) fn apply_changes(doc: &mut Document, changes: &[FieldChange], except:
                     doc.update_dict(w.obj, |d| d.set(b"F".to_vec(), Object::Int(new)))?;
                 }
             }
+        }
+        if c.default_value.is_some() {
+            crate::set_props(doc, &c.name, &crate::FieldProps { default_value: c.default_value.clone(), ..Default::default() })?;
         }
     }
     Ok(())
