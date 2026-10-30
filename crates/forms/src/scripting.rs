@@ -42,6 +42,9 @@ pub struct FieldChange {
     pub required: Option<bool>,
     /// `display.visible` 0, `hidden` 1, `noPrint` 2, `noView` 3.
     pub display: Option<i32>,
+    /// Acrobat `textColor` / `fillColor` colour arrays. Only RGB arrays are writable.
+    pub text_color: Option<Vec<String>>,
+    pub fill_color: Option<Vec<String>>,
 }
 
 /// What a script did.
@@ -105,6 +108,12 @@ pub(crate) fn apply_changes(doc: &mut Document, changes: &[FieldChange], except:
     if changes.is_empty() {
         return Ok(());
     }
+    // Validate every colour before applying any part of the script's changes.
+    for c in changes {
+        for color in [&c.text_color, &c.fill_color].into_iter().flatten() {
+            js_rgb(color)?;
+        }
+    }
     let all = fields(doc);
     for c in changes {
         let Some(f) = all.iter().find(|f| f.name == c.name) else { continue };
@@ -151,8 +160,39 @@ pub(crate) fn apply_changes(doc: &mut Document, changes: &[FieldChange], except:
                 }
             }
         }
+        if c.text_color.is_some() || c.fill_color.is_some() {
+            crate::set_props(
+                doc,
+                &c.name,
+                &crate::FieldProps {
+                    appearance: Some(crate::LookPatch {
+                        text: c.text_color.as_deref().map(js_rgb).transpose()?,
+                        fill: c.fill_color.as_deref().map(|v| js_rgb(v).map(Some)).transpose()?,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )?;
+        }
     }
     Ok(())
+}
+
+fn js_rgb(values: &[String]) -> Result<[f64; 3], FormError> {
+    let [space, red, green, blue] = values else {
+        return Err(FormError::Invalid("JavaScript field colours must be RGB arrays with three components".into()));
+    };
+    if space != "RGB" {
+        return Err(FormError::Invalid("JavaScript field colours must use the RGB colour space".into()));
+    }
+    let mut rgb = [0.0; 3];
+    for (slot, value) in rgb.iter_mut().zip([red, green, blue]) {
+        *slot = value.parse::<f64>().map_err(|_| FormError::Invalid("JavaScript field colours must be finite RGB values between 0 and 1".into()))?;
+        if !slot.is_finite() || !(0.0..=1.0).contains(slot) {
+            return Err(FormError::Invalid("JavaScript field colours must be finite RGB values between 0 and 1".into()));
+        }
+    }
+    Ok(rgb)
 }
 
 /// Apply what a button or console script changed (values, read-only, required, visibility),

@@ -109,15 +109,18 @@ fn display(doc: &pdfcraft_cos::Document, f: &Field) -> i32 {
 
 /// A form field as scripts see it.
 pub fn field_state(doc: &pdfcraft_cos::Document, f: &Field) -> pdfcraft_js::FieldState {
-    field_state_with_display(f, display(doc, f))
+    field_state_with_display(doc, f, display(doc, f))
 }
 
-fn field_state_with_display(f: &Field, display: i32) -> pdfcraft_js::FieldState {
+fn field_state_with_display(doc: &pdfcraft_cos::Document, f: &Field, display: i32) -> pdfcraft_js::FieldState {
     let mut s = pdfcraft_js::FieldState::new(f.name.clone(), kind(f.kind), f.value.clone());
     s.default = f.default.clone();
     s.readonly = f.read_only();
     s.required = f.has(pdfcraft_forms::flags::REQUIRED);
     s.display = display;
+    let look = pdfcraft_forms::look(doc, f);
+    s.text_color = Some(std::iter::once("RGB".to_string()).chain(look.text.map(|v| v.to_string())).collect());
+    s.fill_color = look.fill.map(|fill| std::iter::once("RGB".to_string()).chain(fill.map(|v| v.to_string())).collect());
     s.char_limit = f.max_len;
     s.options = match f.kind {
         FieldKind::CheckBox | FieldKind::Radio => f.widgets.iter().filter_map(|w| w.on_state.clone()).map(|o| (o.clone(), o)).collect(),
@@ -147,8 +150,16 @@ fn changes(before: &[pdfcraft_js::FieldState], after: &[pdfcraft_js::FieldState]
                 read_only: (a.readonly != b.readonly).then_some(a.readonly),
                 required: (a.required != b.required).then_some(a.required),
                 display: (a.display != b.display).then_some(a.display),
+                text_color: (a.text_color != b.text_color).then(|| a.text_color.clone()).flatten(),
+                fill_color: (a.fill_color != b.fill_color).then(|| a.fill_color.clone()).flatten(),
             };
-            (c.value.is_some() || c.read_only.is_some() || c.required.is_some() || c.display.is_some()).then_some(c)
+            (c.value.is_some()
+                || c.read_only.is_some()
+                || c.required.is_some()
+                || c.display.is_some()
+                || c.text_color.is_some()
+                || c.fill_color.is_some())
+            .then_some(c)
         })
         .collect()
 }
@@ -206,7 +217,7 @@ impl Scripts for JsRunner {
                     Some(w) => *self.displays.entry(w.obj).or_insert_with(|| display(&self.cos, f)),
                     None => pdfcraft_js::DISPLAY_VISIBLE,
                 };
-                field_state_with_display(f, display)
+                field_state_with_display(&self.cos, f, display)
             })
             .collect();
         let states = std::sync::Arc::new(states);
