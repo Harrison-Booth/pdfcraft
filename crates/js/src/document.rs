@@ -83,6 +83,9 @@ pub(crate) fn field_object(ctx: &mut Context, name: &str) -> JsObject {
                 return Err(error("charLimit applies only to text fields"));
             }
             let n = arg(args, 0).to_number(c)?;
+            if f.is_comb && n == 0.0 {
+                return Err(error("charLimit cannot be zero for comb fields"));
+            }
             if !n.is_finite() || n < 0.0 || n.fract() != 0.0 || n > i32::MAX as f64 {
                 return Err(error("charLimit must be an integer from 0 to 2147483647"));
             }

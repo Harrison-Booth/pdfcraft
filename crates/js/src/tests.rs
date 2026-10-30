@@ -5,6 +5,8 @@ fn fields() -> Vec<FieldState> {
     agree.options = vec![("Yes".into(), "Yes".into())];
     let mut size = FieldState::new("size", FieldType::ComboBox, vec!["m".into()]);
     size.options = vec![("s".into(), "Small".into()), ("m".into(), "Medium".into()), ("l".into(), "Large".into())];
+    let mut comb = FieldState::new("comb", FieldType::Text, vec!["123".into()]);
+    comb.is_comb = true;
     vec![
         FieldState::new("price", FieldType::Text, vec!["12.5".into()]),
         FieldState::new("qty", FieldType::Text, vec!["4".into()]),
@@ -12,6 +14,7 @@ fn fields() -> Vec<FieldState> {
         FieldState::new("zip", FieldType::Text, vec!["02134".into()]),
         agree,
         size,
+        comb,
     ]
 }
 
@@ -2098,6 +2101,7 @@ fn char_limit_setter_is_bounded_and_text_only() {
         "getField('qty').charLimit=NaN",
         "getField('qty').charLimit=1e100",
         "getField('size').charLimit=3",
+        "getField('comb').charLimit=0",
     ] {
         let rejected = go(script, &Event::doc("Open"));
         assert!(rejected.error.is_some(), "accepted {script}");

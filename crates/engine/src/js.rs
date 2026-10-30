@@ -119,6 +119,7 @@ fn field_state_with_display(f: &Field, display: i32) -> pdfcraft_js::FieldState 
     s.required = f.has(pdfcraft_forms::flags::REQUIRED);
     s.display = display;
     s.char_limit = f.max_len;
+    s.is_comb = f.is_comb();
     s.options = match f.kind {
         FieldKind::CheckBox | FieldKind::Radio => f.widgets.iter().filter_map(|w| w.on_state.clone()).map(|o| (o.clone(), o)).collect(),
         _ => f.options.clone(),

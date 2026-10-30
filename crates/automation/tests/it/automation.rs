@@ -9909,6 +9909,19 @@ fn saved_selection_indices(path: &Path, name: &str) -> Option<Vec<i64>> {
     f.get(b"I").map(|i| d.resolve(i).as_array().unwrap().iter().map(|o| o.as_int().unwrap()).collect())
 }
 
+/// `/MaxLen` directly stored on the top-level field `name` in the saved file `path`.
+fn saved_field_max_len(path: &Path, name: &str) -> Option<i64> {
+    let d = pdfcraft_cos::Document::open(std::sync::Arc::new(std::fs::read(path).unwrap())).unwrap();
+    let root = d.get(d.root().unwrap()).as_dict().cloned().unwrap();
+    let form = d.resolve(root.get(b"AcroForm").unwrap()).as_dict().cloned().unwrap();
+    let all = d.resolve(form.get(b"Fields").unwrap()).as_array().cloned().unwrap();
+    let field = all
+        .iter()
+        .filter_map(|o| d.resolve(o).as_dict().cloned())
+        .find(|field| field.get(b"T").and_then(|t| d.resolve(t).as_string().map(|s| s.to_text())).as_deref() == Some(name))?;
+    field.int(b"MaxLen")
+}
+
 #[test]
 fn changing_a_lists_options_through_tools_keeps_its_saved_selection_on_the_same_items() {
     let dir = workdir("choice-index");
@@ -10270,6 +10283,11 @@ fn javascript_char_limit_persists_and_is_enforced_through_tools() {
     let readback = ok(&mut a, "js_run", json!({ "doc": reopened, "script": "console.println(getField('Qty').charLimit)" }));
     assert_eq!(readback["console"][0], "3");
     ok(&mut a, "js_run", json!({ "doc": reopened, "script": "getField('Qty').charLimit=0" }));
+    ok(&mut a, "doc_save", json!({ "doc": reopened, "path": "unlimited.pdf" }));
+    let unlimited = ok(&mut a, "doc_open", json!({ "path": "unlimited.pdf" }))["doc"].as_u64().unwrap();
+    let unlimited_readback = ok(&mut a, "js_run", json!({ "doc": unlimited, "script": "console.println(getField('Qty').charLimit)" }));
+    assert_eq!(unlimited_readback["console"][0], "0");
     let cleared = ok(&mut a, "js_run", json!({ "doc": reopened, "script": "console.println(getField('Qty').charLimit)" }));
     assert_eq!(cleared["console"][0], "0");
+    assert_eq!(saved_field_max_len(&dir.join("unlimited.pdf"), "Qty"), Some(0));
 }
