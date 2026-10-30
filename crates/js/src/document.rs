@@ -76,6 +76,48 @@ pub(crate) fn field_object(ctx: &mut Context, name: &str) -> JsObject {
         let idx: Vec<JsValue> = f.options.iter().enumerate().filter(|(_, o)| f.value.contains(&o.0)).map(|(i, _)| JsValue::from(i as f64)).collect();
         if idx.len() == 1 { idx[0].clone() } else { JsArray::from_iter(idx, c).into() }
     });
+    let indices_set = {
+        fn set(_: &JsValue, args: &[JsValue], name: &JsString, c: &mut Context) -> JsResult<JsValue> {
+            let f = read(c, name)?;
+            if !matches!(f.kind, FieldType::ComboBox | FieldType::ListBox) {
+                return Err(error("currentValueIndices applies only to choice fields"));
+            }
+            let raw = arg(args, 0);
+            let mut indices = Vec::new();
+            if let Some(o) = raw.as_object().filter(|o| o.is_array()) {
+                let a = JsArray::from_object(o.clone())?;
+                let len = a.length(c)?;
+                if len > u64::try_from(f.options.len()).unwrap_or(u64::MAX) {
+                    return Err(error("too many currentValueIndices"));
+                }
+                for i in 0..len {
+                    let v = a.get(i, c)?.to_number(c)?;
+                    if !v.is_finite() || v < 0.0 || v.fract() != 0.0 {
+                        return Err(error("currentValueIndices must be non-negative integers"));
+                    }
+                    let index = v as usize;
+                    if index >= f.options.len() || indices.contains(&index) {
+                        return Err(error("currentValueIndices contains an invalid or duplicate option index"));
+                    }
+                    indices.push(index);
+                }
+            } else {
+                let v = raw.to_number(c)?;
+                if !v.is_finite() || v < 0.0 || v.fract() != 0.0 {
+                    return Err(error("currentValueIndices must be non-negative integers"));
+                }
+                let index = v as usize;
+                if index >= f.options.len() {
+                    return Err(error("currentValueIndices contains an invalid option index"));
+                }
+                indices.push(index);
+            }
+            let values = indices.into_iter().filter_map(|i| f.options.get(i).map(|o| o.0.clone())).collect();
+            write(c, name, |f| set_value(f, values))?;
+            Ok(JsValue::undefined())
+        }
+        function(ctx, NativeFunction::from_copy_closure_with_captures(set, n.clone()))
+    };
     let text_color_get = getter!(ctx, n, |f, c| colour(&f.text_color, c));
     let text_color_set = {
         fn set(_: &JsValue, args: &[JsValue], name: &JsString, c: &mut Context) -> JsResult<JsValue> {
@@ -147,7 +189,7 @@ pub(crate) fn field_object(ctx: &mut Context, name: &str) -> JsObject {
         .accessor(js_string!("numItems"), Some(num_items), None, rw)
         .accessor(js_string!("charLimit"), Some(char_limit), None, rw)
         .accessor(js_string!("exportValues"), Some(export_values), None, rw)
-        .accessor(js_string!("currentValueIndices"), Some(indices), None, rw)
+        .accessor(js_string!("currentValueIndices"), Some(indices), Some(indices_set), rw)
         .accessor(js_string!("textColor"), Some(text_color_get), Some(text_color_set), rw)
         .accessor(js_string!("fillColor"), Some(fill_color_get), Some(fill_color_set), rw)
         .function(get_item_at, js_string!("getItemAt"), 2)

@@ -10190,3 +10190,45 @@ fn simple_rule_scan_drawn(content: &[u8]) -> Vec<u8> {
     }
     write_full(&doc, &SaveOptions::default()).unwrap()
 }
+#[test]
+fn javascript_current_value_indices_persist_through_tools() {
+    let dir = workdir("js-current-value-indices");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(
+        &mut a,
+        "form_add_field",
+        json!({ "doc": doc, "page": 1, "type": "combo", "rect": [20, 50, 180, 72], "name": "Size", "options": ["s", "m", "l"] }),
+    );
+    ok(
+        &mut a,
+        "form_add_field",
+        json!({ "doc": doc, "page": 1, "type": "list", "rect": [20, 80, 180, 102], "name": "Choices", "options": ["a", "b", "c"], "multi_select": true }),
+    );
+    ok(&mut a, "form_fill", json!({ "doc": doc, "values": { "Size": "s", "Choices": ["a"] } }));
+    let result = ok(
+        &mut a,
+        "js_run",
+        json!({
+            "doc": doc,
+            "script": "getField('Size').currentValueIndices=2; getField('Choices').currentValueIndices=[0,2]; console.println([getField('Size').value,getField('Choices').value].join('|'));"
+        }),
+    );
+    assert_eq!(result["console"][0], "l|a,c");
+    let fields = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    let field = |name: &str| fields["fields"].as_array().unwrap().iter().find(|f| f["name"] == name).unwrap().clone();
+    assert_eq!(field("Size")["value"], "l");
+    assert_eq!(field("Choices")["value"], json!(["a", "c"]));
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    let undone = ok(&mut a, "form_fields", json!({ "doc": doc }));
+    assert_eq!(undone["fields"].as_array().unwrap().iter().find(|f| f["name"] == "Size").unwrap()["value"], "s");
+    ok(&mut a, "edit_redo", json!({ "doc": doc }));
+    ok(&mut a, "doc_save", json!({ "doc": doc, "path": "setters.pdf" }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "setters.pdf" }))["doc"].as_u64().unwrap();
+    let readback = ok(
+        &mut a,
+        "js_run",
+        json!({ "doc": reopened, "script": "console.println([getField('Size').currentValueIndices,getField('Choices').currentValueIndices].join('|'))" }),
+    );
+    assert_eq!(readback["console"][0], "2|0,2");
+}

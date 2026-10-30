@@ -2058,3 +2058,19 @@ fn a_plain_form_sees_the_xfa_version_but_not_installed() {
     assert_eq!(o.value, "undefined number 3.5");
     assert_eq!(o.alerts, [Message::plain("old viewer")]);
 }
+#[test]
+fn field_choice_index_setter_maps_options_and_rejects_bad_indices() {
+    let o = go(
+        "var s=getField('size'); s.currentValueIndices=2; event.value=[getField('size').value,getField('size').currentValueIndices].join('|');",
+        &Event::field("Mouse Up", "size", ""),
+    );
+    assert_eq!(o.error, None);
+    assert_eq!(o.value, "l|2");
+    let size = o.changed.iter().find(|f| f.name == "size").unwrap();
+    assert_eq!(size.value, ["l"]);
+    for script in ["getField('size').currentValueIndices=NaN", "getField('size').currentValueIndices=3"] {
+        let rejected = go(script, &Event::doc("Open"));
+        assert!(rejected.error.is_some(), "accepted {script}");
+        assert!(rejected.changed.is_empty(), "mutated on refusal: {script}");
+    }
+}
