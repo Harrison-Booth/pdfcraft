@@ -2073,6 +2073,9 @@ fn field_choice_index_setter_maps_options_and_rejects_bad_indices() {
         assert!(rejected.error.is_some(), "accepted {script}");
         assert!(rejected.changed.is_empty(), "mutated on refusal: {script}");
     }
+    let rejected = go("getField('size').currentValueIndices=[0,2]", &Event::doc("Open"));
+    assert!(rejected.error.is_some(), "accepted multiple combo-box selections");
+    assert!(rejected.changed.is_empty(), "mutated on refused multiple combo-box selections");
 }
 
 #[test]

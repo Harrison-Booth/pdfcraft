@@ -111,6 +111,9 @@ pub(crate) fn field_object(ctx: &mut Context, name: &str) -> JsObject {
             if let Some(o) = raw.as_object().filter(|o| o.is_array()) {
                 let a = JsArray::from_object(o.clone())?;
                 let len = a.length(c)?;
+                if f.kind == FieldType::ComboBox && len > 1 {
+                    return Err(error("a combo box can select only one item"));
+                }
                 if len > u64::try_from(f.options.len()).unwrap_or(u64::MAX) {
                     return Err(error("too many currentValueIndices"));
                 }
