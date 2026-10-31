@@ -3146,7 +3146,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let date_text = crate::date_text_for_pdf(&app.session);
     let by_line = app.session.stamp_by_line(&author);
     let custom_stamp = match app.quick_tool {
-        QuickTool::CustomStamp(i) => app.custom_stamps.get(i).cloned(),
+        QuickTool::CustomStamp(id) => app.custom_stamps.iter().find(|stamp| stamp.id == id).cloned(),
         _ => None,
     };
     let mut open_props: Option<(usize, usize)> = None;

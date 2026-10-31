@@ -213,6 +213,7 @@ impl PdfCraftApp {
             image_import: None,
             custom_stamps: Vec::new(),
             stamp_draft: Default::default(),
+            stamp_edit: None,
             optimize_draft: OptimizeDraft::default(),
             optimize_run: None,
             progress_notice: None,

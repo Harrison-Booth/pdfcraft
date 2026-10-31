@@ -110,7 +110,7 @@ fn creating_placing_and_keeping_custom_stamps() {
     h.run_steps(1);
     h.get_by_label("OK").click();
     h.run_steps(2);
-    assert_eq!(h.state().quick_tool, QuickTool::CustomStamp(0));
+    assert_eq!(h.state().quick_tool, QuickTool::CustomStamp(h.state().custom_stamps[0].id));
     h.get_by_label("Company");
     h.get_by_label("logo");
     // Place it.
