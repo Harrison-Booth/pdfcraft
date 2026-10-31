@@ -31,6 +31,7 @@ pub(crate) fn set_attachments_exact(dst: &mut Document, mut entries: Vec<(Vec<u8
     write_attachments(dst, &mut entries, false)
 }
 
+/// Write a flat, sorted `/EmbeddedFiles` name tree, optionally renaming duplicate keys.
 fn write_attachments(dst: &mut Document, entries: &mut [(Vec<u8>, Object)], uniquify: bool) -> Result<(), OrganizeError> {
     if entries.is_empty() {
         return Ok(());

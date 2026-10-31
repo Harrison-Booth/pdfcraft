@@ -1572,6 +1572,7 @@ fn dialog_about(ui: &mut egui::Ui, req: &mut Pending) -> bool {
     true
 }
 
+/// Draw the active dialog's footer and record any requested action in `req`.
 fn dialog_footer(ui: &mut egui::Ui, app: &mut PdfCraftApp, dialog: Dialog, req: &mut Pending) {
     ui.add_space(16.0);
     let changed = draft_changes(app).is_some_and(|c| !c.is_empty());
