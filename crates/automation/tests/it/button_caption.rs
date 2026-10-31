@@ -37,7 +37,7 @@ fn button_caption_can_be_changed_after_creation() {
     let result = tool(
         &mut a,
         "js_run",
-        json!({ "doc": id, "field": "clear_button", "script": "getField('clear_button').buttonSetCaption('Clear Form'); getField('clear_button').buttonGetCaption();" }),
+        json!({ "doc": id, "field": "clear_button", "script": "getField('clear_button').value='ignored'; getField('clear_button').buttonSetCaption('Clear Form'); getField('clear_button').buttonGetCaption();" }),
     );
     assert_eq!(result["result"], "Clear Form");
     let fields = tool(&mut a, "form_fields", json!({"doc": id}));
