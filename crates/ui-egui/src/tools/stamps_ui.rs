@@ -14,6 +14,9 @@ pub const MAX_STAMP_BYTES: usize = 4 << 20;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CustomStamp {
+    /// Stable library identity; unlike a vector position it survives sorting and edits.
+    #[serde(default)]
+    pub id: u64,
     pub category: String,
     pub name: String,
     /// The source file's name (its extension tells images from PDFs).
@@ -95,6 +98,35 @@ pub(crate) fn create_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens) 
     (save, cancel)
 }
 
+pub(crate) fn edit_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, _t: &Tokens) -> (bool, bool) {
+    let Some(edit) = app.stamp_edit.as_mut() else { return (false, true) };
+    ui.label(egui::RichText::new(tl!("Edit Custom Stamp")).font(theme::semibold(18.0)));
+    ui.add_space(8.0);
+    egui::Grid::new("stamp-edit").num_columns(2).spacing([10.0, 8.0]).show(ui, |ui| {
+        ui.label(tl!("Category:"));
+        ui.add(crate::widgets::line(&mut edit.category).desired_width(240.0));
+        ui.end_row();
+        ui.label(tl!("Name:"));
+        ui.add(crate::widgets::line(&mut edit.name).desired_width(240.0));
+        ui.end_row();
+    });
+    ui.add_space(12.0);
+    let valid = !edit.name.trim().is_empty() && !edit.category.trim().is_empty();
+    let (mut save, mut cancel) = (false, false);
+    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        if ui.add_enabled_ui(valid, |ui| widgets::pill_button(ui, tl!("Save"), true)).inner.clicked() {
+            save = true;
+        }
+        if widgets::pill_button(ui, tl!("Cancel"), false).clicked() {
+            cancel = true;
+        }
+    });
+    if cancel {
+        app.stamp_edit = None;
+    }
+    (save, cancel)
+}
+
 /// The Custom stamps section of the stamps palette.
 pub(crate) fn palette_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens) {
     widgets::section_title(ui, tl!("Custom"));
@@ -104,23 +136,29 @@ pub(crate) fn palette_section(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Toke
     categories.dedup();
     for c in categories {
         ui.label(egui::RichText::new(&c).small().color(t.text_muted));
-        for (i, s) in app.custom_stamps.iter().enumerate().filter(|(_, s)| s.category == c) {
-            let active = app.quick_tool == QuickTool::CustomStamp(i);
+        for s in app.custom_stamps.iter().filter(|s| s.category == c) {
+            let active = app.quick_tool == QuickTool::CustomStamp(s.id);
             let resp = ui.add(egui::Button::selectable(active, s.name.as_str()).min_size(egui::vec2(ui.available_width(), 28.0)));
             if resp.clicked() {
-                app.quick_tool = QuickTool::CustomStamp(i);
+                app.quick_tool = QuickTool::CustomStamp(s.id);
             }
             resp.context_menu(|ui| {
+                if ui.button(tl!("Rename / change category…")).clicked() {
+                    app.stamp_edit = Some(StampEdit { id: s.id, name: s.name.clone(), category: s.category.clone() });
+                    ui.close();
+                }
                 if ui.button(tl!("Delete stamp")).clicked() {
-                    remove = Some(i);
+                    remove = Some(s.id);
                     ui.close();
                 }
             });
         }
     }
-    if let Some(i) = remove {
-        app.custom_stamps.remove(i);
-        app.quick_tool = QuickTool::Select;
+    if let Some(id) = remove {
+        app.custom_stamps.retain(|s| s.id != id);
+        if app.quick_tool == QuickTool::CustomStamp(id) {
+            app.quick_tool = QuickTool::Select;
+        }
     }
     ui.add_space(4.0);
     if widgets::pill_button(ui, tl!("Create custom stamp…"), false).on_hover_text(tl!("From a PDF page or an image")).clicked() {
@@ -170,9 +208,52 @@ impl PdfCraftApp {
     /// Save the dialog's stamp in the library and choose it.
     pub(crate) fn save_custom_stamp(&mut self) {
         let d = std::mem::take(&mut self.stamp_draft);
-        self.custom_stamps.push(CustomStamp { category: d.category.trim().into(), name: d.name.trim().into(), file: d.file, page: 0, data: d.data });
-        self.quick_tool = QuickTool::CustomStamp(self.custom_stamps.len() - 1);
+        let id = match new_stamp_id(&self.custom_stamps) {
+            Ok(id) => id,
+            Err(error) => {
+                self.notify(error);
+                return;
+            }
+        };
+        self.custom_stamps.push(CustomStamp {
+            id,
+            category: d.category.trim().into(),
+            name: d.name.trim().into(),
+            file: d.file,
+            page: 0,
+            data: d.data,
+        });
+        self.quick_tool = QuickTool::CustomStamp(id);
     }
+
+    /// Rename a saved stamp or move it to another category without changing its source bytes.
+    pub fn edit_custom_stamp(&mut self, id: u64, name: &str, category: &str) -> Result<(), String> {
+        let name = name.trim();
+        let category = category.trim();
+        if name.is_empty() || category.is_empty() {
+            return Err("stamp name and category must not be empty".into());
+        }
+        let stamp = self.custom_stamps.iter_mut().find(|stamp| stamp.id == id).ok_or_else(|| "custom stamp no longer exists".to_string())?;
+        stamp.name = name.into();
+        stamp.category = category.into();
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StampEdit {
+    pub id: u64,
+    pub name: String,
+    pub category: String,
+}
+
+fn new_stamp_id(stamps: &[CustomStamp]) -> Result<u64, String> {
+    let used: std::collections::HashSet<u64> = stamps.iter().map(|stamp| stamp.id).collect();
+    let mut candidate = 1;
+    while used.contains(&candidate) {
+        candidate = candidate.checked_add(1).ok_or_else(|| "custom stamp library has no available identity".to_string())?;
+    }
+    Ok(candidate)
 }
 
 /// The custom stamps for `persist` (kept small: base64 of each file).
@@ -182,7 +263,91 @@ pub(crate) fn encode(stamps: &[CustomStamp]) -> serde_json::Value {
 
 /// Read stamps back; malformed entries are dropped.
 pub(crate) fn decode(v: &serde_json::Value) -> Vec<CustomStamp> {
-    v.as_array()
+    let mut stamps: Vec<CustomStamp> = v
+        .as_array()
         .map(|a| a.iter().filter_map(|x| serde_json::from_value::<CustomStamp>(x.clone()).ok()).filter(|s| s.data.len() <= MAX_STAMP_BYTES).collect())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let mut ids = std::collections::HashSet::new();
+    let mut fallback = u64::MAX;
+    for stamp in &mut stamps {
+        if stamp.id == 0 || !ids.insert(stamp.id) {
+            while fallback == 0 || ids.contains(&fallback) {
+                fallback = fallback.saturating_sub(1);
+            }
+            stamp.id = fallback;
+            ids.insert(fallback);
+            fallback = fallback.saturating_sub(1);
+        }
+    }
+    stamps
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn editing_a_saved_stamp_keeps_its_selected_identity_and_source_bytes() {
+        let mut app = PdfCraftApp::new();
+        let bytes = Arc::new(vec![1, 2, 3]);
+        app.custom_stamps = vec![
+            CustomStamp { id: 101, category: "Old".into(), name: "Duplicate".into(), file: "one.png".into(), page: 0, data: bytes.clone() },
+            CustomStamp { id: 202, category: "Other".into(), name: "Duplicate".into(), file: "two.png".into(), page: 0, data: Arc::new(vec![4]) },
+        ];
+        app.quick_tool = QuickTool::CustomStamp(101);
+        app.edit_custom_stamp(101, "Renamed", "Moved").expect("valid edit");
+        assert_eq!(app.custom_stamps[0].name, "Renamed");
+        assert_eq!(app.custom_stamps[0].category, "Moved");
+        assert!(Arc::ptr_eq(&app.custom_stamps[0].data, &bytes));
+        app.custom_stamps.sort_by(|a, b| a.name.cmp(&b.name));
+        assert!(app.custom_stamps.iter().any(|s| s.id
+            == match app.quick_tool {
+                QuickTool::CustomStamp(id) => id,
+                _ => 0,
+            }));
+        app.custom_stamps.retain(|s| s.id != 202);
+        assert!(app.custom_stamps.iter().any(|s| s.id == 101));
+    }
+
+    #[test]
+    fn edits_refuse_blank_fields_and_missing_entries_without_mutating_the_library() {
+        let mut app = PdfCraftApp::new();
+        app.custom_stamps.push(CustomStamp {
+            id: 77,
+            category: "Tools".into(),
+            name: "Mark".into(),
+            file: "mark.png".into(),
+            page: 0,
+            data: Arc::new(vec![9]),
+        });
+        assert!(app.edit_custom_stamp(77, "  ", "New").is_err());
+        assert!(app.edit_custom_stamp(77, "New", " ").is_err());
+        assert!(app.edit_custom_stamp(88, "New", "New").is_err());
+        assert_eq!(app.custom_stamps[0].name, "Mark");
+        assert_eq!(app.custom_stamps[0].category, "Tools");
+    }
+
+    #[test]
+    fn stamp_identity_survives_settings_round_trip_and_old_settings_get_ids() {
+        let saved = [CustomStamp {
+            id: u64::MAX - 1,
+            category: "Tools".into(),
+            name: "Mark".into(),
+            file: "mark.png".into(),
+            page: 0,
+            data: Arc::new(vec![9]),
+        }];
+        let restored = decode(&encode(&saved));
+        assert_eq!(restored[0].id, u64::MAX - 1);
+        assert_eq!(restored[0].data.as_slice(), &[9]);
+        let old = serde_json::json!([{"category":"Tools","name":"Old","file":"old.png","page":0,"data":"CQ=="}]);
+        assert_ne!(decode(&old)[0].id, 0);
+    }
+
+    #[test]
+    fn new_stamp_ids_skip_existing_values() {
+        let make = |id| CustomStamp { id, category: String::new(), name: String::new(), file: String::new(), page: 0, data: Arc::new(Vec::new()) };
+        assert_eq!(new_stamp_id(&[make(1), make(2)]), Ok(3));
+        assert!(new_stamp_id(&[make(u64::MAX), make(1), make(2)]).is_ok());
+    }
 }

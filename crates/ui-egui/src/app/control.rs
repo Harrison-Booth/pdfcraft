@@ -287,11 +287,14 @@ impl PdfCraftApp {
                     "column-select" => QuickTool::ColumnSelect,
                     "certify" => QuickTool::SignArea { certify: true },
                     custom if custom.starts_with("custom-stamp-") => {
-                        let i: usize = custom[13..].parse().map_err(|_| format!("bad stamp {custom}"))?;
-                        if i >= self.custom_stamps.len() {
-                            return Err(format!("there are {} custom stamps", self.custom_stamps.len()));
-                        }
-                        QuickTool::CustomStamp(i)
+                        let key = &custom[13..];
+                        let id = key
+                            .parse::<u64>()
+                            .ok()
+                            .filter(|id| self.custom_stamps.iter().any(|stamp| stamp.id == *id))
+                            .or_else(|| key.parse::<usize>().ok().and_then(|index| self.custom_stamps.get(index).map(|stamp| stamp.id)))
+                            .ok_or_else(|| format!("unknown custom stamp {key}; there are {} custom stamps", self.custom_stamps.len()))?;
+                        QuickTool::CustomStamp(id)
                     }
                     stamp if stamp.starts_with("stamp-") => QuickTool::Stamp(
                         pdfcraft_engine::StampKind::ALL
