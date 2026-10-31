@@ -330,6 +330,11 @@ impl Document {
         self.editor.as_ref().map(|e| a11y::tags(&e.cos)).unwrap_or_default()
     }
 
+    /// A page of structure classes from the document's `/ClassMap`.
+    pub fn class_map(&self, offset: usize, limit: usize) -> (usize, Vec<a11y::ClassMapEntry>) {
+        self.editor.as_ref().map(|e| a11y::class_map(&e.cos, offset, limit)).unwrap_or_default()
+    }
+
     /// Marked-content items directly owned by one reachable indirect structure tag.
     pub fn tag_content(&self, object: pdfcraft_cos::ObjRef) -> Result<Vec<a11y::TagContentItem>, a11y::TagError> {
         self.editor.as_ref().map(|e| a11y::tag_content(&e.cos, object)).unwrap_or_else(|| Ok(Vec::new()))

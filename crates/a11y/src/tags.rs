@@ -1,6 +1,7 @@
 //! Properties of reachable indirect structure elements.
 
 use pdfcraft_cos::{CosError, Dict, Document, ObjRef, Object, PdfString};
+use std::collections::{BTreeSet, HashMap};
 
 use crate::alt;
 
@@ -21,6 +22,8 @@ pub struct TagInfo {
     pub summary: Option<String>,
     /// A header cell's `Scope` attribute (`Row`, `Column` or `Both`).
     pub scope: Option<String>,
+    /// Structure class names from the tag's `/C` entry.
+    pub classes: Vec<String>,
     /// Zero-based page when `/Pg` is known.
     pub page: Option<usize>,
 }
@@ -31,6 +34,14 @@ pub struct TagContentItem {
     pub page: Option<usize>,
     pub mcid: i64,
     pub text: String,
+}
+
+/// One preserved `/ClassMap` entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClassMapEntry {
+    pub name: String,
+    /// Number of reachable tags whose `/C` entry names this class.
+    pub assignments: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,6 +55,7 @@ pub enum TagProperty {
     Summary,
     /// A header cell's `Scope` (a Table attribute): `Row`, `Column` or `Both`.
     Scope,
+    Class,
 }
 
 /// Where to place a structure tag relative to one of its direct siblings.
@@ -63,6 +75,7 @@ impl TagProperty {
             "language" => Some(Self::Language),
             "summary" => Some(Self::Summary),
             "scope" => Some(Self::Scope),
+            "class" => Some(Self::Class),
             _ => None,
         }
     }
@@ -76,6 +89,7 @@ impl TagProperty {
             Self::Language => b"Lang",
             Self::Summary => b"Summary",
             Self::Scope => b"Scope",
+            Self::Class => b"C",
         }
     }
 
@@ -107,6 +121,14 @@ pub enum TagError {
     WrongTagType(&'static str, &'static str),
     #[error("a scope must be Row, Column or Both")]
     InvalidScope,
+    #[error("the document has no class map")]
+    NoClassMap,
+    #[error("class name must be a nonempty PDF name using letters, digits, colon, period, underscore or hyphen (maximum 127 bytes)")]
+    InvalidClass,
+    #[error("class {0} already exists")]
+    DuplicateClass(String),
+    #[error("class {0} does not exist")]
+    UnknownClass(String),
     #[error(transparent)]
     Cos(#[from] CosError),
 }
@@ -169,10 +191,54 @@ pub fn tags(doc: &Document) -> Vec<TagInfo> {
                 language: text(doc, &e.dict, b"Lang"),
                 summary: table_attribute(doc, &e.dict, b"Summary").and_then(|o| o.as_string().map(PdfString::to_text)),
                 scope: table_attribute(doc, &e.dict, b"Scope").and_then(|o| o.as_name().map(|n| String::from_utf8_lossy(n).into_owned())),
+                classes: class_names(doc, &e.dict),
                 page: e.page.and_then(|p| page_index.get(&p).copied()),
             })
         })
         .collect()
+}
+
+/// List a page of `/ClassMap` entries without resolving or flattening their values.
+pub fn class_map(doc: &Document, offset: usize, limit: usize) -> (usize, Vec<ClassMapEntry>) {
+    let Some(map) = class_map_dict(doc) else { return (0, Vec::new()) };
+    let assignments = tags(doc).into_iter().fold(HashMap::<String, usize>::new(), |mut counts, tag| {
+        for name in tag.classes.into_iter().collect::<BTreeSet<_>>() {
+            let count = counts.entry(name).or_default();
+            *count = count.saturating_add(1);
+        }
+        counts
+    });
+    let count = map.len();
+    let entries = map
+        .iter()
+        .skip(offset)
+        .take(limit.min(1000))
+        .map(|(key, _)| {
+            let name = String::from_utf8_lossy(key).into_owned();
+            ClassMapEntry { assignments: assignments.get(&name).copied().unwrap_or_default(), name }
+        })
+        .collect();
+    (count, entries)
+}
+
+fn class_map_dict(doc: &Document) -> Option<Dict> {
+    alt::tree_root(doc)?.get(b"ClassMap").map(|o| doc.resolve(o)).and_then(|o| o.as_dict().cloned())
+}
+
+fn class_names(doc: &Document, tag: &Dict) -> Vec<String> {
+    let Some(value) = tag.get(b"C") else { return Vec::new() };
+    let value = doc.resolve(value);
+    match &*value {
+        Object::Name(name) => vec![String::from_utf8_lossy(name).into_owned()],
+        Object::Array(items) => {
+            items.iter().filter_map(|item| doc.resolve(item).as_name().map(|name| String::from_utf8_lossy(name).into_owned())).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn valid_class_name(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 127 && value.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b':' | b'.' | b'_' | b'-'))
 }
 
 /// List marked-content references directly owned by an indirect tag.
@@ -328,6 +394,26 @@ pub fn set_tag_property(doc: &mut Document, object: ObjRef, property: TagPropert
     {
         return Err(TagError::InvalidType);
     }
+    if property == TagProperty::Class {
+        let classes: Vec<&str> = value.filter(|s| !s.trim().is_empty()).map(|s| s.split(',').map(str::trim).collect()).unwrap_or_default();
+        let map = class_map_dict(doc);
+        for class in &classes {
+            if !valid_class_name(class) {
+                return Err(TagError::InvalidClass);
+            }
+            if !map.as_ref().is_some_and(|map| map.contains(class.as_bytes())) {
+                return Err(if map.is_none() { TagError::NoClassMap } else { TagError::UnknownClass((*class).to_owned()) });
+            }
+        }
+        doc.update_dict(object, |d| match classes.as_slice() {
+            [] => {
+                d.remove(b"C");
+            }
+            [class] => d.set(b"C".to_vec(), Object::name(class)),
+            _ => d.set(b"C".to_vec(), Object::Array(classes.iter().map(|class| Object::name(class)).collect())),
+        })?;
+        return Ok(());
+    }
     if let Some(owner) = property.table_attribute_of() {
         let role_map =
             alt::tree_root(doc).and_then(|r| r.get(b"RoleMap").map(|o| doc.resolve(o))).and_then(|o| o.as_dict().cloned()).unwrap_or_default();
@@ -355,5 +441,97 @@ pub fn set_tag_property(doc: &mut Document, object: ObjRef, property: TagPropert
             d.remove(property.key());
         }
     })?;
+    Ok(())
+}
+
+/// Rename one `/ClassMap` entry and every reachable `/C` use, preserving the class value object.
+pub fn rename_class(doc: &mut Document, old: &str, new: &str) -> Result<(), TagError> {
+    if !valid_class_name(old) || !valid_class_name(new) {
+        return Err(TagError::InvalidClass);
+    }
+    let map = class_map_dict(doc).ok_or(TagError::NoClassMap)?;
+    if !map.contains(old.as_bytes()) {
+        return Err(TagError::UnknownClass(old.to_owned()));
+    }
+    if old == new {
+        return Ok(());
+    }
+    if map.contains(new.as_bytes()) {
+        return Err(TagError::DuplicateClass(new.to_owned()));
+    }
+    let root_ref = doc.root().and_then(|r| doc.get(r).as_dict()?.reference(b"StructTreeRoot")).ok_or(TagError::NoClassMap)?;
+    let class_map = doc.get(root_ref).as_dict().and_then(|d| d.get(b"ClassMap")).cloned().ok_or(TagError::NoClassMap)?;
+    match class_map {
+        Object::Ref(map_ref) => doc.update_dict(map_ref, |d| {
+            if let Some(value) = d.remove(old.as_bytes()) {
+                d.set(new.as_bytes().to_vec(), value);
+            }
+        })?,
+        Object::Dict(mut d) => {
+            if let Some(value) = d.remove(old.as_bytes()) {
+                d.set(new.as_bytes().to_vec(), value);
+            }
+            doc.update_dict(root_ref, |root| {
+                root.set(b"ClassMap".to_vec(), Object::Dict(d));
+            })?;
+        }
+        _ => return Err(TagError::NoClassMap),
+    }
+    for element in alt::elements(doc) {
+        let Some(value) = element.dict.get(b"C") else { continue };
+        match value {
+            Object::Name(name) if name == old.as_bytes() => {
+                doc.update_dict(element.object, |d| {
+                    d.set(b"C".to_vec(), Object::name(new));
+                })?;
+            }
+            Object::Array(items) => {
+                let mut items = items.clone();
+                let mut changed = false;
+                for item in &mut items {
+                    if item.as_name() == Some(old.as_bytes()) {
+                        *item = Object::name(new);
+                        changed = true;
+                    } else if let Object::Ref(name_ref) = item
+                        && doc.get(*name_ref).as_name() == Some(old.as_bytes())
+                    {
+                        *item = Object::name(new);
+                        changed = true;
+                    }
+                }
+                if changed {
+                    doc.update_dict(element.object, |d| {
+                        d.set(b"C".to_vec(), Object::Array(items));
+                    })?;
+                }
+            }
+            Object::Ref(value_ref) => match (*doc.get(*value_ref)).clone() {
+                Object::Name(name) if name == old.as_bytes() => {
+                    doc.update_dict(element.object, |d| {
+                        d.set(b"C".to_vec(), Object::name(new));
+                    })?;
+                }
+                Object::Array(mut items) => {
+                    let mut changed = false;
+                    for item in &mut items {
+                        if item.as_name() == Some(old.as_bytes()) {
+                            *item = Object::name(new);
+                            changed = true;
+                        } else if let Object::Ref(name_ref) = item
+                            && doc.get(*name_ref).as_name() == Some(old.as_bytes())
+                        {
+                            *item = Object::name(new);
+                            changed = true;
+                        }
+                    }
+                    if changed {
+                        doc.set(*value_ref, Object::Array(items));
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
     Ok(())
 }

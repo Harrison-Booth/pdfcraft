@@ -237,6 +237,7 @@ impl Edit {
             Edit::SetAltText { .. } => Label::of("Set alternate text"),
             Edit::AutoTagFormFields => Label::of("Tag form fields"),
             Edit::SetTagProperty { .. } => Label::of("Change tag properties"),
+            Edit::RenameClass { .. } => Label::of("Rename structure class"),
             Edit::MoveTag { .. } => Label::of("Move object"),
             Edit::MarkDecorative { .. } => Label::of("Mark figure as decorative"),
             Edit::MarkTagArtifact { .. } => Label::of("Mark content as artifact"),
