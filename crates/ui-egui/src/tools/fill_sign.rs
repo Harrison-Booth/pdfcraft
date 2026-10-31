@@ -384,6 +384,22 @@ fn signature_preview(text: &str, style: pdfcraft_engine::SignatureStyle, w: usiz
     img
 }
 
+fn signature_style_warning(text: &str, style: pdfcraft_engine::SignatureStyle, c: char) -> String {
+    let (style_name, other_style) = match style {
+        pdfcraft_engine::SignatureStyle::Script => (tl!("Script"), pdfcraft_engine::SignatureStyle::Print),
+        pdfcraft_engine::SignatureStyle::Print => (tl!("Print"), pdfcraft_engine::SignatureStyle::Script),
+    };
+    let recommendation = if pdfcraft_engine::signature_missing(text, other_style).is_some() {
+        tl!("use the Image tab")
+    } else {
+        match other_style {
+            pdfcraft_engine::SignatureStyle::Script => tl!("choose Script"),
+            pdfcraft_engine::SignatureStyle::Print => tl!("choose Print"),
+        }
+    };
+    format!("{style_name} can't draw \"{}\" (U+{:04X}); {recommendation}.", c.escape_debug(), u32::from(c))
+}
+
 /// Saved previews and add/remove controls, shared by the left panel and quick-tool picker.
 pub(crate) fn signature_entries(ui: &mut egui::Ui, app: &mut crate::PdfCraftApp, t: &Tokens) -> Option<&'static str> {
     ui.set_width(ui.available_width().clamp(240.0, 248.0));
@@ -714,14 +730,7 @@ pub(crate) fn signature_pad(
                 });
         });
         if let Some(c) = pdfcraft_engine::signature_missing(d.text.trim(), d.style) {
-            let style = match d.style {
-                pdfcraft_engine::SignatureStyle::Script => tl!("Script"),
-                pdfcraft_engine::SignatureStyle::Print => tl!("Print"),
-            };
-            ui.colored_label(
-                ui.visuals().error_fg_color,
-                format!("{style} can't draw \"{}\" (U+{:04X}); choose another style.", c.escape_debug(), u32::from(c)),
-            );
+            ui.colored_label(ui.visuals().error_fg_color, signature_style_warning(d.text.trim(), d.style, c));
         }
         let (apply, cancel) = pad_buttons(ui, d);
         return (apply, cancel, false);
@@ -976,6 +985,12 @@ impl crate::PdfCraftApp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unsupported_typed_signature_warning_points_to_the_image_tab_when_needed() {
+        let warning = super::signature_style_warning("Ada张", pdfcraft_engine::SignatureStyle::Print, '张');
+        assert!(warning.contains("Image tab"), "{warning}");
+    }
+
     #[test]
     fn typed_draft_requires_the_selected_style_to_draw_every_character() {
         let mut draft = super::SigDraft { text: "Саша".into(), style: pdfcraft_engine::SignatureStyle::Print, ..Default::default() };
