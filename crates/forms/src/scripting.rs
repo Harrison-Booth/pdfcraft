@@ -42,6 +42,7 @@ pub struct FieldChange {
     pub required: Option<bool>,
     /// `display.visible` 0, `hidden` 1, `noPrint` 2, `noView` 3.
     pub display: Option<i32>,
+    pub caption: Option<String>,
 }
 
 /// What a script did.
@@ -150,6 +151,12 @@ pub(crate) fn apply_changes(doc: &mut Document, changes: &[FieldChange], except:
                     doc.update_dict(w.obj, |d| d.set(b"F".to_vec(), Object::Int(new)))?;
                 }
             }
+        }
+        if let Some(caption) = &c.caption {
+            if f.kind != FieldKind::PushButton {
+                return Err(FormError::Invalid(format!("{} is not a push button", f.name)));
+            }
+            crate::set_props(doc, &f.name, &crate::FieldProps { caption: Some((0, caption.clone())), ..Default::default() })?;
         }
     }
     Ok(())

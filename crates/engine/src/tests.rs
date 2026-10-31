@@ -5208,6 +5208,26 @@ fn form_javascript_validates_calculates_and_formats() {
     assert!(s.get(id).unwrap().form.iter().find(|f| f.name == "total").unwrap().read_only());
     assert_eq!(s.get(id).unwrap().can_undo(), Some("Run JavaScript"));
 
+    let caption =
+        s.run_javascript(id, "getField('go').buttonSetCaption('Continue'); event.value = getField('go').buttonGetCaption();", Some("go")).unwrap();
+    assert_eq!(caption.error, None);
+    assert_eq!(caption.result.as_deref(), Some("Continue"));
+    assert_eq!(
+        s.get(id).unwrap().form.iter().find(|f| f.name == "go").and_then(|f| f.widgets.first()).and_then(|w| w.caption.as_deref()),
+        Some("Continue")
+    );
+    assert_eq!(s.get(id).unwrap().can_undo(), Some("Run JavaScript"));
+    s.undo(id).unwrap();
+    assert_ne!(
+        s.get(id).unwrap().form.iter().find(|f| f.name == "go").and_then(|f| f.widgets.first()).and_then(|w| w.caption.as_deref()),
+        Some("Continue")
+    );
+    s.redo(id).unwrap();
+    assert_eq!(
+        s.get(id).unwrap().form.iter().find(|f| f.name == "go").and_then(|f| f.widgets.first()).and_then(|w| w.caption.as_deref()),
+        Some("Continue")
+    );
+
     // JavaScript off: scripts don't run.
     s.set_javascript(false);
     s.apply(id, Edit::SetFieldValue { name: "qty".into(), value: FieldValue::Text("500".into()) }).unwrap();
