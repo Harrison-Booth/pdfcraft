@@ -140,6 +140,7 @@ impl SigDraft {
         } else {
             !self.text.trim().is_empty()
                 && self.text.chars().take(pdfcraft_engine::MAX_SIGNATURE_CHARS + 1).count() <= pdfcraft_engine::MAX_SIGNATURE_CHARS
+                && pdfcraft_engine::signature_missing(self.text.trim(), self.style).is_none()
         }
     }
 
@@ -150,10 +151,11 @@ impl SigDraft {
             self.image.clone().map(SavedSig::Image)
         } else if self.drawing {
             Some(SavedSig::Drawn(self.strokes.clone()))
-        } else if self.style == pdfcraft_engine::SignatureStyle::Script {
-            Some(SavedSig::Typed(self.text.trim().to_string()))
         } else {
-            Some(SavedSig::TypedStyle { text: self.text.trim().to_string(), style: self.style })
+            self.ready().then(|| match self.style {
+                pdfcraft_engine::SignatureStyle::Script => SavedSig::Typed(self.text.trim().to_string()),
+                style => SavedSig::TypedStyle { text: self.text.trim().to_string(), style },
+            })
         }
     }
 }
@@ -711,6 +713,16 @@ pub(crate) fn signature_pad(
                     ui.selectable_value(&mut d.style, pdfcraft_engine::SignatureStyle::Print, tl!("Print"));
                 });
         });
+        if let Some(c) = pdfcraft_engine::signature_missing(d.text.trim(), d.style) {
+            let style = match d.style {
+                pdfcraft_engine::SignatureStyle::Script => tl!("Script"),
+                pdfcraft_engine::SignatureStyle::Print => tl!("Print"),
+            };
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                format!("{style} can't draw \"{}\" (U+{:04X}); choose another style.", c.escape_debug(), u32::from(c)),
+            );
+        }
         let (apply, cancel) = pad_buttons(ui, d);
         return (apply, cancel, false);
     }
@@ -964,6 +976,15 @@ impl crate::PdfCraftApp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn typed_draft_requires_the_selected_style_to_draw_every_character() {
+        let mut draft = super::SigDraft { text: "Саша".into(), style: pdfcraft_engine::SignatureStyle::Print, ..Default::default() };
+        assert!(draft.ready(), "Inter covers Cyrillic typed signatures");
+        draft.text.push('张');
+        assert!(!draft.ready());
+        assert!(draft.saved().is_none(), "an incomplete signature cannot be applied");
+    }
+
     #[test]
     fn undo_removes_the_last_stroke_and_skips_empty_ones() {
         let mut d = super::SigDraft { drawing: true, ..Default::default() };
