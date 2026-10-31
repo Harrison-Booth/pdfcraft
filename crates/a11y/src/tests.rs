@@ -367,6 +367,79 @@ fn reachable_tag_properties_round_trip_and_reject_unrelated_objects() {
     assert!(matches!(set_tag_property(&mut doc, pdfcraft_cos::ObjRef::new(4, 1), TagProperty::Title, Some("No")), Err(TagError::NotATag(_))));
 }
 
+#[test]
+fn class_map_rename_keeps_attributes_and_updates_shared_array_assignments() {
+    let mut doc = structure_doc(&[
+        "<< /S /Document /K [4 0 R 5 0 R] >>".into(),
+        "<< /S /P /C [/Cell /Shared] >>".into(),
+        "<< /S /P /C /Shared >>".into(),
+        "<< /O /Table /RowSpan 2 >>".into(),
+        "<< /Cell 6 0 R /Shared << /O /Table /ColSpan 3 >> >>".into(),
+    ]);
+    doc.update_dict(pdfcraft_cos::ObjRef::new(2, 0), |root| {
+        root.set(b"ClassMap".to_vec(), Object::Ref(pdfcraft_cos::ObjRef::new(7, 0)));
+    })
+    .unwrap();
+    assert_eq!(class_map(&doc, 0, 1).0, 2);
+    assert_eq!(class_map(&doc, 0, 1).1[0].assignments, 1);
+    assert!(matches!(rename_class(&mut doc, "Cell", "Shared"), Err(TagError::DuplicateClass(_))));
+    rename_class(&mut doc, "Cell", "CellRenamed").unwrap();
+    let (count, classes) = class_map(&doc, 0, 10);
+    assert_eq!(count, 2);
+    let renamed = classes.iter().find(|entry| entry.name == "CellRenamed").unwrap();
+    assert_eq!(renamed.assignments, 1);
+    assert_eq!(tags(&doc)[1].classes, ["CellRenamed", "Shared"]);
+    assert_eq!(doc.get(pdfcraft_cos::ObjRef::new(2, 0)).as_dict().unwrap().reference(b"ClassMap"), Some(pdfcraft_cos::ObjRef::new(7, 0)));
+    let map_object = doc.get(pdfcraft_cos::ObjRef::new(7, 0));
+    let map = map_object.as_dict().unwrap();
+    assert_eq!(map.reference(b"CellRenamed"), Some(pdfcraft_cos::ObjRef::new(6, 0)));
+    assert_eq!(doc.get(pdfcraft_cos::ObjRef::new(6, 0)).as_dict().unwrap().get(b"RowSpan"), Some(&Object::Int(2)));
+    assert_eq!(doc.get(pdfcraft_cos::ObjRef::new(5, 0)).as_dict().unwrap().get(b"C").and_then(Object::as_name), Some(b"Shared".as_slice()));
+}
+
+#[test]
+fn class_assignment_requires_an_existing_class_and_can_be_cleared() {
+    let mut doc = structure_doc(&["<< /S /Document /K 4 0 R >>".into(), "<< /S /P >>".into()]);
+    doc.update_dict(pdfcraft_cos::ObjRef::new(2, 0), |root| {
+        root.set(
+            b"ClassMap".to_vec(),
+            Object::Dict({
+                let mut map = pdfcraft_cos::Dict::new();
+                map.set(b"Paragraph".to_vec(), Object::Dict(pdfcraft_cos::Dict::new()));
+                map
+            }),
+        );
+    })
+    .unwrap();
+    let tag = pdfcraft_cos::ObjRef::new(4, 0);
+    assert!(matches!(set_tag_property(&mut doc, tag, TagProperty::Class, Some("Missing")), Err(TagError::UnknownClass(_))));
+    set_tag_property(&mut doc, tag, TagProperty::Class, Some("Paragraph")).unwrap();
+    assert_eq!(tags(&doc)[1].classes, ["Paragraph"]);
+    set_tag_property(&mut doc, tag, TagProperty::Class, None).unwrap();
+    assert!(tags(&doc)[1].classes.is_empty());
+}
+
+#[test]
+fn class_map_edits_bound_cyclic_tags_and_leave_malformed_assignments_intact() {
+    let mut doc = structure_doc(&["<< /S /P /K 3 0 R /C [/Old 7 /Old] >>".into()]);
+    doc.update_dict(pdfcraft_cos::ObjRef::new(2, 0), |root| {
+        root.set(
+            b"ClassMap".to_vec(),
+            Object::Dict({
+                let mut map = pdfcraft_cos::Dict::new();
+                map.set(b"Old".to_vec(), Object::Int(12));
+                map
+            }),
+        );
+    })
+    .unwrap();
+    assert_eq!(tags(&doc).len(), 1);
+    rename_class(&mut doc, "Old", "New").unwrap();
+    assert_eq!(tags(&doc).len(), 1);
+    assert_eq!(tags(&doc)[0].classes, ["New", "New"]);
+    assert_eq!(class_map(&doc, 0, 10).1[0].assignments, 1);
+}
+
 /// A table (object 4) with a header cell (6) and a data cell (7); `th` is the header cell's
 /// dictionary and `extra` more objects from 8 on, of which the Document element (3) lists `kids`
 /// after the table. The role map maps /MyTable to /Table.
