@@ -38,6 +38,7 @@ pub const FILL_TOOLS: [FillTool; 8] =
 pub enum SavedSig {
     Drawn(Vec<Vec<[f32; 2]>>),
     Typed(String),
+    TypedStyle { text: String, style: pdfcraft_engine::SignatureStyle },
     Image(#[serde(with = "image_data")] SignatureImage),
 }
 
@@ -50,6 +51,7 @@ impl SavedSig {
                 strokes.iter().map(|s| s.iter().map(|p| [f64::from(p[0]), f64::from(p[1])]).collect()).collect(),
             )),
             SavedSig::Typed(text) => pdfcraft_engine::typed_signature_graphic(text),
+            SavedSig::TypedStyle { text, style } => pdfcraft_engine::typed_signature_graphic_with_style(text, *style),
             SavedSig::Image(image) => Some(image.graphic()),
         }
     }
@@ -79,6 +81,7 @@ pub(crate) mod image_data {
 pub struct SigDraft {
     pub strokes: Vec<Vec<[f32; 2]>>,
     pub text: String,
+    pub style: pdfcraft_engine::SignatureStyle,
     /// The Draw tab (otherwise Type).
     pub drawing: bool,
     /// The Image tab. The file is held in the draft until Apply.
@@ -105,6 +108,7 @@ impl SigDraft {
         match saved {
             SavedSig::Drawn(strokes) => Self { strokes: strokes.clone(), drawing: true, initials, editing: true, ..Default::default() },
             SavedSig::Typed(text) => Self { text: text.clone(), initials, editing: true, ..Default::default() },
+            SavedSig::TypedStyle { text, style } => Self { text: text.clone(), style: *style, initials, editing: true, ..Default::default() },
             SavedSig::Image(image) => Self { image: Some(image.clone()), image_mode: true, initials, editing: true, ..Default::default() },
         }
     }
@@ -146,8 +150,10 @@ impl SigDraft {
             self.image.clone().map(SavedSig::Image)
         } else if self.drawing {
             Some(SavedSig::Drawn(self.strokes.clone()))
-        } else {
+        } else if self.style == pdfcraft_engine::SignatureStyle::Script {
             Some(SavedSig::Typed(self.text.trim().to_string()))
+        } else {
+            Some(SavedSig::TypedStyle { text: self.text.trim().to_string(), style: self.style })
         }
     }
 }
@@ -286,7 +292,19 @@ pub fn signature_at(page: usize, at: [f64; 2], strokes: &[Vec<[f32; 2]>], rotati
 /// Place typed text in the script font with its left edge at `at`, `height` points tall, upright
 /// as displayed on a page turned by `rotation`.
 pub fn typed_signature_at(page: usize, at: [f64; 2], text: &str, height: f64, rotation: i64, author: &str) -> Option<Edit> {
-    pdfcraft_engine::typed_signature_shape(at, text, height, rotation).map(|shape| new(page, shape, String::new(), author))
+    typed_signature_at_style(page, at, text, height, rotation, author, pdfcraft_engine::SignatureStyle::Script)
+}
+
+fn typed_signature_at_style(
+    page: usize,
+    at: [f64; 2],
+    text: &str,
+    height: f64,
+    rotation: i64,
+    author: &str,
+    style: pdfcraft_engine::SignatureStyle,
+) -> Option<Edit> {
+    pdfcraft_engine::typed_signature_shape_with_style(at, text, height, rotation, style).map(|shape| new(page, shape, String::new(), author))
 }
 
 /// Place a saved signature or initials, upright as `info`'s page is displayed.
@@ -295,19 +313,28 @@ pub fn place(page: usize, info: &PageInfo, at: [f64; 2], sig: &SavedSig, initial
     match sig {
         SavedSig::Drawn(strokes) => signature_at(page, at, strokes, rotation, author),
         SavedSig::Image(image) => image.edit(page, info, at, initials, author),
-        SavedSig::Typed(text) => {
-            let [left, bottom, right, top] = pdfcraft_engine::script_outline(text).bounds();
+        SavedSig::Typed(text) | SavedSig::TypedStyle { text, style: _ } => {
+            let style = match sig {
+                SavedSig::TypedStyle { style, .. } => *style,
+                _ => pdfcraft_engine::SignatureStyle::Script,
+            };
+            let [left, bottom, right, top] = pdfcraft_engine::signature_outline(text, style).bounds();
             let height = if initials { 24.0_f64 } else { 32.0_f64 };
             // Keep long names within the same placement width as drawn signatures.
             let height = height.min(150.0 * (top - bottom).max(0.1) / (right - left).max(0.01));
-            typed_signature_at(page, at, text, height, rotation, author)
+            typed_signature_at_style(page, at, text, height, rotation, author, style)
         }
     }
 }
 
 /// The text in the script font as a picture (`w`×`h` px, black on transparent), for previews.
+#[cfg(test)]
 pub(crate) fn script_preview(text: &str, w: usize, h: usize) -> egui::ColorImage {
-    let o = pdfcraft_engine::script_outline(text);
+    signature_preview(text, pdfcraft_engine::SignatureStyle::Script, w, h)
+}
+
+fn signature_preview(text: &str, style: pdfcraft_engine::SignatureStyle, w: usize, h: usize) -> egui::ColorImage {
+    let o = pdfcraft_engine::signature_outline(text, style);
     let mut img = egui::ColorImage::filled([w, h], Color32::TRANSPARENT);
     let [left, bottom, right, top] = o.bounds();
     let span = (top - bottom).max(0.1);
@@ -406,9 +433,13 @@ pub(crate) fn signature_entries(ui: &mut egui::Ui, app: &mut crate::PdfCraftApp,
 pub(crate) fn paint_saved(ui: &egui::Ui, rect: egui::Rect, saved: &SavedSig, cache: &mut Option<(SavedSig, egui::TextureHandle)>, key: &str) {
     let painter = ui.painter_at(rect);
     match saved {
-        SavedSig::Typed(text) => {
+        SavedSig::Typed(text) | SavedSig::TypedStyle { text, .. } => {
             if cache.as_ref().is_none_or(|(s, _)| s != saved) {
-                *cache = Some((saved.clone(), ui.ctx().load_texture(key, script_preview(text, 480, 104), egui::TextureOptions::LINEAR)));
+                let style = match saved {
+                    SavedSig::TypedStyle { style, .. } => *style,
+                    _ => pdfcraft_engine::SignatureStyle::Script,
+                };
+                *cache = Some((saved.clone(), ui.ctx().load_texture(key, signature_preview(text, style, 480, 104), egui::TextureOptions::LINEAR)));
             }
             if let Some((_, tex)) = cache {
                 let size = vec2(480.0, 104.0) * (rect.width() / 480.0).min(rect.height() / 104.0);
@@ -660,14 +691,26 @@ pub(crate) fn signature_pad(
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, CornerRadius::same(6), Color32::WHITE);
         painter.rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-        let key = SavedSig::Typed(d.text.clone());
+        let key = SavedSig::TypedStyle { text: d.text.clone(), style: d.style };
         if preview.as_ref().is_none_or(|(s, _)| *s != key) {
-            let img = script_preview(&d.text, 920, 300);
+            let img = signature_preview(&d.text, d.style, 920, 300);
             *preview = Some((key, ui.ctx().load_texture("typed-signature", img, egui::TextureOptions::LINEAR)));
         }
         if let Some((_, tex)) = preview {
             painter.image(tex.id(), rect.shrink(4.0), egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         }
+        ui.horizontal(|ui| {
+            ui.label(tl!("Style"));
+            craft_ui::ComboBox::from_id_salt("typed-signature-style")
+                .selected_text(match d.style {
+                    pdfcraft_engine::SignatureStyle::Script => tl!("Script"),
+                    pdfcraft_engine::SignatureStyle::Print => tl!("Print"),
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut d.style, pdfcraft_engine::SignatureStyle::Script, tl!("Script"));
+                    ui.selectable_value(&mut d.style, pdfcraft_engine::SignatureStyle::Print, tl!("Print"));
+                });
+        });
         let (apply, cancel) = pad_buttons(ui, d);
         return (apply, cancel, false);
     }
