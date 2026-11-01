@@ -321,9 +321,9 @@ impl Session {
     }
 }
 
-/// `SOURCE_DATE_EPOCH` as seconds, or `None` when it is unset or not a whole number.
+/// `SOURCE_DATE_EPOCH` as non-negative seconds, or `None` when it is unset or invalid.
 fn source_date_epoch(value: Option<&str>) -> Option<i64> {
-    value?.trim().parse().ok()
+    value?.trim().parse().ok().filter(|seconds| *seconds >= 0)
 }
 
 #[cfg(test)]
@@ -331,9 +331,12 @@ mod source_date_tests {
     use super::source_date_epoch;
 
     #[test]
-    fn only_a_whole_number_fixes_the_clock() {
+    fn only_non_negative_whole_seconds_fix_the_clock() {
         assert_eq!(source_date_epoch(Some(" 1700000000\n")), Some(1_700_000_000));
-        for bad in [None, Some(""), Some("yesterday"), Some("1.5")] {
+        assert_eq!(source_date_epoch(Some("0")), Some(0));
+        // pdf_date supports the entire positive i64 range, including years past 9999.
+        assert_eq!(source_date_epoch(Some("9223372036854775807")), Some(i64::MAX));
+        for bad in [None, Some(""), Some("yesterday"), Some("1.5"), Some("-1"), Some("-9223372036854775808"), Some("9223372036854775808")] {
             assert_eq!(source_date_epoch(bad), None);
         }
     }

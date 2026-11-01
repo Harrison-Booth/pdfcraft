@@ -200,6 +200,8 @@ Ranked; detail and the full milestone table in [docs/roadmap.md](docs/roadmap.md
 
 ## Progress log
 
+- **2026-10-31 (M1.9, #4929 follow-up):** Negative `SOURCE_DATE_EPOCH` values fall back to the wall clock. CLI subprocess regressions check the saved `/ModDate` and byte-identical output for combine and full/incremental edit, including the zero epoch and invalid-value fallback. Builds on #4929; encrypted-save and external-oracle limitations remain. Estimates unchanged.
+
 - **2026-10-27 (M2, gap 22 partial):** Deterministic save is tested (separately opened documents save to identical bytes, full and incremental, with and without object streams) and `SOURCE_DATE_EPOCH` fixes the engine clock on non-wasm targets; `/AF` survives saves; `Document::text_string` writes UTF-8 for 2.0 files, used for bookmark titles. Other text writers, a UI switch, qpdf and veraPDF checks remain. Estimates unchanged.
 - **2026-10-27 (M10, OCR models):** Model staging downloads and verifies the ONNX pair after the upstream RTEN URL brownout; runtime discovery prefers complete ONNX pairs per directory, retains complete RTEN fallback and preserves directory precedence.
 - **2026-10-24 (M10, #4158 partial):** Word, HTML, RTF and PowerPoint export keep a block that continues another on its line (an italic case name, a link, a superscript) as a run in its own style inside that paragraph, with the source's word space, instead of a paragraph of its own. Style changes that wrap onto the next line still split paragraphs (the reading blocks keep style boundaries). Estimates unchanged.
