@@ -358,8 +358,8 @@ milestone = "M1"
 status = "partial"
 commands = []
 tools = []
-evidence = ["crates/cos/tests/it/writer.rs::saves_are_byte_identical_across_runs_and_keep_associated_files"]
-notes = "Same document and edits give the same bytes: full and incremental saves are checked byte-identical across separately opened documents (own hash state), with and without object streams (crates/cos/tests/it/writer.rs); /ID derives from the content. SOURCE_DATE_EPOCH, when set to whole seconds, fixes the clock the engine stamps /ModDate and edit dates with. Missing: encrypted saves (random salts and IVs), a UI or automation switch, no check against another producer."
+evidence = ["crates/cos/tests/it/writer.rs::saves_are_byte_identical_across_runs_and_keep_associated_files", "apps/pdfcraft-cli/tests/it/source_date_epoch.rs::combine_uses_the_epoch_and_repeats_identical_bytes", "apps/pdfcraft-cli/tests/it/source_date_epoch.rs::full_and_incremental_edit_use_the_epoch_and_repeat_identical_bytes"]
+notes = "Same document and edits give the same bytes: full and incremental saves are checked byte-identical across separately opened documents (own hash state), with and without object streams (crates/cos/tests/it/writer.rs); /ID derives from the content. SOURCE_DATE_EPOCH, when set to non-negative whole seconds in the i64 range, fixes the clock the engine stamps /ModDate and edit dates with; invalid or unset values retain the wall clock. CLI combine and full/incremental edit are covered through subprocesses. Missing: encrypted saves (random salts and IVs), a UI or automation switch, no check against another producer."
 
 [[feature]]
 id = "core.linearization"

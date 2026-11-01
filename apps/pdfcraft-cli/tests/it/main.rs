@@ -15,6 +15,7 @@ mod render;
 mod root_arguments;
 mod run_report;
 mod run_root;
+mod source_date_epoch;
 mod split;
 mod stderr;
 mod stdout;

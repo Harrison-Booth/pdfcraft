@@ -70,6 +70,11 @@ flag, autosave and the automation tools consistent for free.
 `split_by_size`, `reduced_bytes`, `optimized_bytes`, `print_pdf`, `export_data`, and the signing
 family (`sign`, `sign_with_timestamp`, `timestamp_document`, `embed_ltv`).
 
+On native builds, `SOURCE_DATE_EPOCH` fixes the session clock for reproducible unencrypted saves.
+It accepts non-negative whole seconds since the Unix epoch, up to `i64::MAX`; unset, invalid,
+negative or overflowing values keep the wall clock. `Session::with_clock` takes precedence.
+The variable is not read on wasm. CLI `combine` and `edit` (full or incremental) use the same clock.
+
 ## Modules
 
 | Module | What it holds |
