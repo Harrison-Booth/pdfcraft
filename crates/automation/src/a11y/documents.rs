@@ -15,7 +15,7 @@ impl Automation {
         if !export.truncated_pages.is_empty() {
             use pdfcraft_engine::compare::{MAX_FORM_DEPTH, MAX_FORM_VISITS};
             out["warnings"] = json!([format!(
-                "forms nested more than {MAX_FORM_DEPTH} deep, or past the first {MAX_FORM_VISITS} forms of a page (forms the page draws itself count too), were left out on the pages in truncated_pages: their text and images are missing from the export, although the viewer may still show them"
+                "pictures past what one export may hold or decode, or forms nested more than {MAX_FORM_DEPTH} deep, or past the first {MAX_FORM_VISITS} forms of a page (forms the page draws itself count too), were left out on the pages in truncated_pages: their text and images are missing from the export, although the viewer may still show them"
             )]);
         }
         Ok(out)
@@ -187,7 +187,9 @@ impl Automation {
             .map(|ch| json!({ "kind": ch.kind.label().to_lowercase(), "old": side(&ch.old), "new": side(&ch.new) }))
             .collect();
         let visual: Vec<Value> = if a.opt_bool("visual")?.unwrap_or(false) {
-            self.session.compare_visual(old, new, 72.0).map_err(failed)?.iter().map(|(p, r)| json!({ "page": p + 1, "rect": r2(r) })).collect()
+            let regions = self.session.compare_visual(old, new, 72.0).map_err(failed)?;
+            let kinds = self.session.visual_kinds(old, new, &regions).map_err(failed)?;
+            regions.into_iter().zip(kinds).map(|((p, r), kind)| json!({ "page": p + 1, "rect": r2(&r), "kind": kind.label() })).collect()
         } else {
             Vec::new()
         };
