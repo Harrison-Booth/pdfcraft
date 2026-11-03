@@ -2002,3 +2002,131 @@ fn a_moved_picture_is_drawn_from_the_fresh_raster_while_a_tile_is_still_stale() 
     h.state_mut().views[0].stale_tiles.clear();
     h.state_mut().views[0].tiles.clear();
 }
+
+#[test]
+fn a_followed_link_flashes_where_its_destination_lands() {
+    let page = |w: f32, h: f32| pdfcraft_render::PageInfo { width: w, height: h, label: String::new(), crop: [0.0, 0.0, w, h], rotation: 0 };
+    let info = pdfcraft_render::DocInfo { pages: vec![page(300.0, 400.0), page(300.0, 400.0)], ..Default::default() };
+    let mut v = view(2, PageLayout::Single, true);
+    // A point's box goes through displayed space and back, so it is right to a rounding error.
+    let near = |got: &Option<(usize, [f32; 4], f64)>, page: usize, want: [f32; 4]| {
+        let (p, r, _) = got.expect("a flash");
+        assert!(p == page && r.iter().zip(want).all(|(g, w)| (g - w).abs() < 0.01), "{r:?} on page {p}, wanted {want:?} on {page}");
+    };
+    // /FitR names the rectangle itself, kept inside the page.
+    v.flash_dest(1, DestView::FitR { rect: [10.0, 20.0, 110.0, 70.0] }, &info);
+    assert_eq!(v.flash, Some((1, [10.0, 20.0, 110.0, 70.0], 0.0)));
+    v.flash_dest(1, DestView::FitR { rect: [-50.0, 20.0, 110.0, 500.0] }, &info);
+    assert_eq!(v.flash, Some((1, [0.0, 20.0, 110.0, 400.0], 0.0)));
+    // A point gets a box hanging from it; a missing coordinate falls back to the page edge.
+    v.flash_dest(0, DestView::Xyz { left: Some(50.0), top: Some(300.0), zoom: None }, &info);
+    near(&v.flash, 0, [50.0, 276.0, 210.0, 300.0]);
+    v.flash_dest(0, DestView::FitH { top: Some(300.0) }, &info);
+    near(&v.flash, 0, [0.0, 276.0, 160.0, 300.0]);
+    // A point on the bottom or right edge shifts the box inward instead of losing it.
+    v.flash_dest(0, DestView::Xyz { left: Some(300.0), top: Some(0.0), zoom: None }, &info);
+    near(&v.flash, 0, [140.0, 0.0, 300.0, 24.0]);
+    // A turned page sizes the box as displayed (160 wide, 24 high on screen), not in user space.
+    let turned = pdfcraft_render::PageInfo { width: 400.0, height: 300.0, label: String::new(), crop: [0.0, 0.0, 300.0, 400.0], rotation: 90 };
+    let info90 = pdfcraft_render::DocInfo { pages: vec![turned], ..Default::default() };
+    v.flash_dest(0, DestView::Xyz { left: Some(50.0), top: Some(300.0), zoom: None }, &info90);
+    let (_, r, _) = v.flash.expect("a flash on the turned page");
+    for (got, want) in r.iter().zip([50.0, 240.0, 74.0, 400.0]) {
+        assert!((got - want).abs() < 0.01, "{r:?}");
+    }
+    // An unknown page clears an earlier flash instead of leaving it on the wrong place.
+    v.flash_dest(0, DestView::FitH { top: Some(300.0) }, &info);
+    assert!(v.flash.is_some());
+    v.flash_dest(9, DestView::FitH { top: Some(300.0) }, &info);
+    assert_eq!(v.flash, None);
+    // Link navigation clamps a nonexistent target to the last page; its flash follows it.
+    v.go_to_dest(usize::MAX, DestView::FitH { top: Some(300.0) }, &info);
+    v.flash_dest(v.current, DestView::FitH { top: Some(300.0) }, &info);
+    assert_eq!(v.current, 1);
+    assert_eq!(v.flash.map(|(page, _, _)| page), Some(v.current));
+    // Nothing to mark: no position, a whole-page fit, an unknown page, or junk numbers.
+    for (page, dest) in [
+        (0, DestView::Top),
+        (0, DestView::Fit),
+        (0, DestView::Xyz { left: None, top: None, zoom: Some(2.0) }),
+        (0, DestView::FitH { top: None }),
+        (9, DestView::FitH { top: Some(300.0) }),
+        (0, DestView::FitR { rect: [f32::NAN, 0.0, 10.0, 10.0] }),
+        (0, DestView::FitR { rect: [500.0, 500.0, 600.0, 600.0] }),
+        (0, DestView::Xyz { left: Some(f32::NAN), top: Some(10.0), zoom: None }),
+    ] {
+        v.flash_dest(page, dest, &info);
+        assert_eq!(v.flash, None, "{dest:?} on page {page}");
+    }
+}
+
+#[test]
+fn destination_flash_respects_reduced_motion_and_duration() {
+    assert_eq!(destination_flash_alpha(0.0, true), Some(255));
+    assert_eq!(destination_flash_alpha(0.8, true), Some(127));
+    assert_eq!(destination_flash_alpha(0.8, false), Some(255));
+    assert_eq!(destination_flash_alpha(1.6, false), None);
+    for age in [-1.0, f32::NAN, f32::INFINITY] {
+        assert_eq!(destination_flash_alpha(age, true), None);
+    }
+}
+
+#[test]
+fn a_null_coordinate_flashes_at_the_place_the_reader_keeps() {
+    let page = pdfcraft_render::PageInfo { width: 300.0, height: 400.0, label: String::new(), crop: [0.0, 0.0, 300.0, 400.0], rotation: 0 };
+    let info = pdfcraft_render::DocInfo { pages: vec![page.clone(), page], ..Default::default() };
+    let mut v = view(2, PageLayout::Single, true);
+    // With both coordinates null the link names no place, so nothing is filled in.
+    let none = DestView::Xyz { left: None, top: None, zoom: Some(2.0) };
+    assert_eq!(v.resolve_dest(none, &info), none);
+    // Once the reader has a laid-out, oversized page, a null coordinate keeps the viewport's
+    // corresponding displayed position. Flashing uses that same resolved destination.
+    v.viewport_screen = Rect::from_min_size(pos2(0.0, 200.0), vec2(240.0, 200.0));
+    v.screen_xforms.push((0, PageXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(300.0, 400.0)), rot: 0, pw: 300.0, ph: 400.0 }));
+    let dest = DestView::Xyz { left: Some(50.0), top: None, zoom: None };
+    let landing = v.resolve_dest(dest, &info);
+    assert_eq!(landing, DestView::Xyz { left: Some(50.0), top: Some(200.0), zoom: None });
+    v.flash_dest(1, landing, &info);
+    assert_eq!(v.flash, Some((1, [50.0, 176.0, 210.0, 200.0], 0.0)));
+    let dest = DestView::Xyz { left: None, top: Some(300.0), zoom: None };
+    let landing = v.resolve_dest(dest, &info);
+    assert_eq!(landing, DestView::Xyz { left: Some(70.0), top: Some(300.0), zoom: None });
+    v.flash_dest(1, landing, &info);
+    assert_eq!(v.flash, Some((1, [70.0, 276.0, 230.0, 300.0], 0.0)));
+    let whole = DestView::Xyz { left: Some(1.0), top: Some(2.0), zoom: None };
+    assert_eq!(v.resolve_dest(whole, &info), whole);
+}
+#[test]
+fn image_handles_account_for_document_and_view_rotation() {
+    for page_rotation in [0, 90, 180, 270] {
+        for view_rotation in [0, 90, 180, 270] {
+            let (width, height) = if page_rotation % 180 == 0 { (300.0, 400.0) } else { (400.0, 300.0) };
+            let info = DocInfo {
+                pages: vec![pdfcraft_render::PageInfo {
+                    width,
+                    height,
+                    label: String::new(),
+                    crop: [0.0, 0.0, 300.0, 400.0],
+                    rotation: page_rotation,
+                }],
+                ..Default::default()
+            };
+            let size = if view_rotation % 180 == 0 { vec2(width, height) } else { vec2(height, width) };
+            let xf = PageXform { rect: Rect::from_min_size(pos2(10.0, 20.0), size), rot: view_rotation, pw: width, ph: height };
+            let obb = ImageObb::from_matrix([100.0, 0.0, 0.0, 50.0, 50.0, 70.0], &xf, &info, 0);
+            let total = (page_rotation + view_rotation) % 360;
+            assert_eq!(obb.is_rotated, total != 0, "page={page_rotation} view={view_rotation}: user-labelled grips need matrix resize when turned");
+            for (handle, point) in obb.handles() {
+                let direction = point - obb.screen_center;
+                let cursor = match handle {
+                    ImageHandle::TopLeft | ImageHandle::TopRight | ImageHandle::BottomLeft | ImageHandle::BottomRight => {
+                        if direction.x * direction.y > 0.0 { egui::CursorIcon::ResizeNwSe } else { egui::CursorIcon::ResizeNeSw }
+                    }
+                    _ if direction.x.abs() > direction.y.abs() => egui::CursorIcon::ResizeHorizontal,
+                    _ => egui::CursorIcon::ResizeVertical,
+                };
+                assert_eq!(obb.handle_cursor(handle), cursor, "page={page_rotation} view={view_rotation} handle={handle:?}");
+            }
+        }
+    }
+}
