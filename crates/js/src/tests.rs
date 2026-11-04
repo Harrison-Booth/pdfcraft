@@ -16,7 +16,7 @@ fn fields() -> Vec<FieldState> {
 }
 
 fn doc() -> DocInfo {
-    DocInfo { file_name: "order.pdf".into(), num_pages: 3, page: 0, info: vec![("title".into(), "Order".into())], xfa: false }
+    DocInfo { file_name: "order.pdf".into(), num_pages: 3, page: 0, info: vec![("title".into(), "Order".into())], ..Default::default() }
 }
 
 fn go(script: &str, event: &Event) -> Outcome {
@@ -29,6 +29,49 @@ fn calculate_scripts_read_fields_and_set_the_value() {
     assert_eq!(o.error, None);
     assert_eq!(o.value, "50");
     assert!(o.rc);
+}
+
+#[test]
+fn get_page_box_returns_supported_boxes_in_rotated_user_space() {
+    let mut document = doc();
+    document.page_boxes = vec![
+        [
+            [10.0, 20.0, 210.0, 320.0],
+            [20.0, 30.0, 200.0, 310.0],
+            [25.0, 35.0, 195.0, 305.0],
+            [30.0, 40.0, 190.0, 300.0],
+            [35.0, 45.0, 185.0, 295.0]
+        ];
+        3
+    ];
+    document.page_rotations = vec![0, 90, 270];
+    let out = run(
+        "JSON.stringify([this.getPageBox(), this.getPageBox('Media', 1), this.getPageBox('Bleed', 0), this.getPageBox('Trim', 0), this.getPageBox('Art', 2)])",
+        &Event::doc("Console"),
+        &document,
+        &[],
+        &[],
+        Limits::default(),
+    );
+    assert_eq!(out.error, None);
+    assert_eq!(out.result.as_deref(), Some("[[0,280,180,0],[-10,190,290,-10],[5,275,175,5],[10,270,170,10],[15,165,265,15]]"));
+}
+
+#[test]
+fn get_page_box_rejects_unknown_boxes_and_invalid_pages() {
+    for script in [
+        "this.getPageBox('BBox')",
+        "this.getPageBox(1)",
+        "this.getPageBox('Crop', -1)",
+        "this.getPageBox('Crop', 1.5)",
+        "this.getPageBox('Crop', 3)",
+        "this.getPageBox('Crop', null)",
+        "this.getPageBox('Crop', true)",
+        "this.getPageBox('Crop', '0')",
+    ] {
+        let out = go(script, &Event::doc("Console"));
+        assert!(out.error.is_some(), "{script}");
+    }
 }
 
 #[test]
@@ -1024,6 +1067,20 @@ mod formcalc {
         assert_eq!(calc(r#"Format("9.9", -0.04)"#), "0.0");
         assert_eq!(calc(r#"Format("99", -0.2)"#), "00");
         assert_eq!(calc(r#"Format("9.9", -1.5)"#), "-1.5");
+    }
+
+    /// A calculated amount shows the number it is, not the binary noise past a double's 15
+    /// significant digits: 279893.88 is stored as 279893.880000000004656…, which twelve fixed
+    /// decimals printed as `279893.880000000005`. Small values keep their twelve decimals.
+    #[test]
+    fn calculated_numbers_print_at_most_fifteen_significant_digits() {
+        assert_eq!(calc("1 * 279893.88"), "279893.88");
+        assert_eq!(calc("1 * 291774.12"), "291774.12");
+        assert_eq!(calc("279893.88 + 291774.12 + 304171.06 + 317107.44 + 273970.85"), "1466917.35");
+        assert_eq!(calc("1000000 / 3"), "333333.333333333");
+        assert_eq!(calc("1000 / 3"), "333.333333333333");
+        assert_eq!(calc("1 / 3"), "0.333333333333");
+        assert_eq!(calc("0.1 + 0.2"), "0.3");
     }
 
     /// Assigning one long value to many fields at once stops at the run's byte budget and is
