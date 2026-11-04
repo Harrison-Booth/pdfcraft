@@ -138,6 +138,15 @@ pub fn set_props(doc: &mut Document, name: &str, props: &FieldProps) -> Result<S
             return invalid(format!("{name} has no widget {}", wi.saturating_add(1)));
         }
     }
+    if props.caption_all.is_some() && f.kind != FieldKind::PushButton {
+        return invalid("only push buttons have a caption");
+    }
+    if props.caption_all.is_some() && f.widgets.is_empty() {
+        return invalid(format!("{name} has no widgets"));
+    }
+    if props.caption_all.is_some() && props.caption.is_some() {
+        return invalid("give a field caption or a widget caption, not both");
+    }
     // Validated before anything is written, so a refused rotation leaves the document unchanged.
     // `Some(Some(rect))`: the widget's axis changes and it gets the swapped rectangle.
     let mut rotated_rect: Option<Option<[f64; 4]>> = None;
@@ -577,16 +586,28 @@ fn apply_late_widget_props(
         mk.set(b"CA".to_vec(), PdfString::text(caption));
         doc.update_dict(w.obj, |d| d.set(b"MK".to_vec(), Object::Dict(mk)))?;
     }
+    if let Some(caption) = &props.caption_all {
+        for w in &f.widgets {
+            let mut mk = doc.get(w.obj).as_dict().and_then(|d| d.get(b"MK").map(|m| doc.resolve(m).as_dict().cloned())).flatten().unwrap_or_default();
+            mk.set(b"CA".to_vec(), PdfString::text(caption));
+            doc.update_dict(w.obj, |d| d.set(b"MK".to_vec(), Object::Dict(mk)))?;
+        }
+    }
     // A label-only edit must not replace another widget's custom appearances.
     let only = props.caption.as_ref().filter(|_| *props == (FieldProps { caption: props.caption.clone(), ..Default::default() })).map(|(wi, _)| *wi);
     Ok(only)
 }
 
 /// Name field `old` `new` in each field's Calculate script that reads it
-/// ([`crate::af::rename_in_calculation`]).
+/// ([`crate::af::rename_in_calculation`]). Script streams share one budget, as a reading of the
+/// form's scripts does, however many fields name the same stream; past it, a script is left as
+/// it is, like one that won't decode. A Calculate action several fields share by reference is
+/// read and rewritten once, in place, so they all read the new name.
 fn rename_in_calculations(doc: &mut Document, all: &[Field], old: &str, new: &str) -> Result<(), FormError> {
     let aa_of =
         |doc: &Document, r: ObjRef| doc.get(r).as_dict().and_then(|d| d.get(b"AA").map(|a| doc.resolve(a))).and_then(|a| a.as_dict().cloned());
+    let mut scripts = crate::script_budget();
+    let mut shared = std::collections::HashSet::new();
     for f in all {
         // The script is the field's, or its only widget's when the field has none, as
         // `actions_of` reads it.
@@ -595,12 +616,16 @@ fn rename_in_calculations(doc: &mut Document, all: &[Field], old: &str, new: &st
             _ => None,
         };
         let Some((owner, mut aa)) = aa_of(doc, f.obj).map(|aa| (f.obj, aa)).or_else(only_widget) else { continue };
+        let by_ref = aa.get(b"C").and_then(Object::as_ref);
+        if by_ref.is_some_and(|r| !shared.insert(r)) {
+            continue;
+        }
         let Some(mut action) = aa.get(b"C").and_then(|a| doc.resolve(a).as_dict().cloned()) else { continue };
         let js = match action.get(b"JS").map(|js| doc.resolve(js)).as_deref() {
             Some(Object::String(s)) => s.to_text(),
             // A stream that isn't UTF-8 reads with replacement characters, which must not be
             // written back in place of what it holds.
-            Some(Object::Stream(s)) => match s.decoded().ok().and_then(|b| String::from_utf8(b).ok()) {
+            Some(Object::Stream(s)) => match scripts.decode(s).ok().and_then(|b| String::from_utf8(b).ok()) {
                 Some(js) => js,
                 None => continue,
             },
@@ -608,6 +633,10 @@ fn rename_in_calculations(doc: &mut Document, all: &[Field], old: &str, new: &st
         };
         let Some(js) = crate::af::rename_in_calculation(&js, old, new) else { continue };
         action.set(b"JS".to_vec(), PdfString::text(&js));
+        if let Some(r) = by_ref {
+            doc.update_dict(r, |d| *d = action)?;
+            continue;
+        }
         aa.set(b"C".to_vec(), Object::Dict(action));
         doc.update_dict(owner, |d| d.set(b"AA".to_vec(), Object::Dict(aa)))?;
     }
