@@ -55,6 +55,17 @@ fn rect_of(h: &Harness<'static, PdfCraftApp>, name: &str) -> [f64; 4] {
     s.session.get(s.views[0].id).unwrap().form.iter().find(|f| f.name == name).unwrap().widgets[0].rect
 }
 
+fn text_center_near(h: &Harness<'static, PdfCraftApp>, label: &str, expected: Pos2) -> Option<Pos2> {
+    h.output()
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text() == label => Some(text.visual_bounding_rect().center()),
+            _ => None,
+        })
+        .min_by(|a, b| a.distance(expected).total_cmp(&b.distance(expected)))
+}
+
 #[test]
 fn placing_moving_editing_and_deleting_a_field() {
     let mut h = harness();
@@ -542,6 +553,99 @@ fn the_fields_panel_orders_tabs_manually() {
     let after = order(&h);
     assert_eq!(after[0], second, "{before:?} → {after:?}");
     assert_eq!(h.state().session.get(h.state().views[0].id).unwrap().can_undo(), Some("Set tab order"));
+}
+
+#[test]
+fn tab_numbers_follow_fill_order_without_dirtying_the_document() {
+    let mut h = harness();
+    h.state_mut().execute("form.prepare");
+    h.run_steps(2);
+    h.get_by_label("Show tab numbers").click();
+    h.run_steps(3);
+
+    let (order, rects, undo) = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let order = pdfcraft_ui_egui::forms_ui::tab_order(&doc.form, &doc.info);
+        let rects = order
+            .iter()
+            .map(|(fi, wi)| {
+                let field = doc.form.get(*fi).expect("the traversal field exists");
+                pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, field, *wi).unwrap()
+            })
+            .collect::<Vec<_>>();
+        (order, rects, doc.can_undo())
+    };
+    assert!(h.state().views[0].prepare.show_tab_numbers);
+    assert_eq!(undo, None, "displaying the numbers does not edit the PDF");
+    let size_widgets = order
+        .iter()
+        .filter(|(fi, _)| h.state().session.get(h.state().views[0].id).unwrap().form.get(*fi).is_some_and(|field| field.name == "size"))
+        .count();
+    assert_eq!(size_widgets, 2, "each radio widget has its own tab stop");
+
+    let drawn: Vec<(String, egui::Pos2, egui::Rect, egui::Rect)> = h
+        .output()
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => {
+                Some((text.galley.text().to_owned(), text.visual_bounding_rect().center(), text.visual_bounding_rect(), clipped.clip_rect))
+            }
+            _ => None,
+        })
+        .collect();
+    for (i, rect) in rects.iter().enumerate() {
+        let expected = i.saturating_add(1).to_string();
+        let badge_center = rect.min + egui::vec2(3.0 + 4.0 + 3.0, 3.0 + 2.0 + 5.0);
+        let badge = drawn.iter().find(|(label, center, _, _)| label == &expected && center.distance(badge_center) < 8.0);
+        let Some((_, _, text_rect, clip_rect)) = badge else {
+            panic!("widget {:?} should show tab number {expected} near {:?}; drawn: {drawn:?}", order.get(i), rect.min);
+        };
+        assert!(clip_rect.contains_rect(*text_rect), "the whole tab number {expected} should be visible");
+    }
+}
+
+#[test]
+fn tab_badge_tracks_its_widget_during_a_drag() {
+    let mut h = harness();
+    h.state_mut().execute("form.prepare");
+    h.run_steps(2);
+    h.get_by_label("Show tab numbers").click();
+    h.run_steps(3);
+
+    let (name, widget, rect) = {
+        let s = h.state();
+        let doc = s.session.get(s.views[0].id).unwrap();
+        let order = pdfcraft_ui_egui::forms_ui::tab_order(&doc.form, &doc.info);
+        let (fi, wi) = *order.first().expect("the form has a fillable widget");
+        let field = doc.form.get(fi).expect("the first fillable field exists");
+        (field.name.clone(), wi, pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, field, wi).unwrap())
+    };
+    let start = rect.center();
+    let badge_before = text_center_near(&h, "1", rect.min + egui::vec2(10.0, 10.0)).expect("the first badge is painted");
+
+    h.hover_at(start);
+    h.run_steps(1);
+    h.drag_at(start);
+    h.run_steps(1);
+    h.drop_at(start);
+    h.run_steps(3);
+    assert_eq!(h.state().views[0].prepare.selected.as_ref().map(|selected| (selected.0.as_str(), selected.1)), Some((name.as_str(), widget)));
+
+    let delta = egui::vec2(24.0, 16.0);
+    h.hover_at(start);
+    h.run_steps(1);
+    h.drag_at(start);
+    h.run_steps(1);
+    h.hover_at(start + delta);
+    h.run_steps(3);
+
+    let badge_during_drag = text_center_near(&h, "1", badge_before + delta).expect("the badge stays painted during the drag");
+    assert!(badge_during_drag.distance(badge_before + delta) < 8.0, "badge {badge_before:?} moved to {badge_during_drag:?}");
+    assert!(badge_during_drag.distance(badge_before) > 12.0, "the badge follows the dragged widget");
+    h.drop_at(start + delta);
+    h.run_steps(3);
 }
 
 #[test]
@@ -1561,4 +1665,86 @@ fn button_export_properties_apply_cancel_and_undo() {
         let f = s.session.get(s.views[0].id).unwrap().form.iter().find(|f| f.name == "agree").unwrap();
         assert_eq!(f.export_of(0), Some(original.as_str()));
     }
+}
+
+/// The screen rectangle of widget 0 of field `name` on the first view.
+fn field_rect(h: &Harness<'static, PdfCraftApp>, name: &str) -> egui::Rect {
+    let s = h.state();
+    let doc = s.session.get(s.views[0].id).unwrap();
+    let f = doc.form.iter().find(|f| f.name == name).unwrap();
+    pdfcraft_ui_egui::forms_ui::field_screen_rect(&s.views[0], &doc.info, f, 0).expect("on screen")
+}
+
+/// A right-click while a field is dragged leaves the dragged field selected, so the drag moves it
+/// and not the field right-clicked. The right-click used to select the other field, and the release
+/// moved that one.
+#[test]
+fn a_right_click_during_a_field_drag_moves_the_dragged_field() {
+    let mut h = harness();
+    h.state_mut().execute("form.prepare");
+    h.run_steps(3);
+    let (name, city) = (field_rect(&h, "name"), field_rect(&h, "city"));
+    let a = name.center();
+    h.hover_at(a);
+    h.run_steps(1);
+    h.drag_at(a);
+    h.run_steps(1);
+    h.hover_at(a + egui::vec2(0.0, 30.0));
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos: city.center(), button: egui::PointerButton::Secondary, pressed, modifiers: Default::default() });
+    }
+    h.run_steps(1);
+    let end = a + egui::vec2(0.0, 60.0);
+    h.hover_at(end);
+    h.run_steps(1);
+    h.drop_at(end);
+    h.run_steps(3);
+    assert_eq!(field_rect(&h, "city"), city, "the field right-clicked stays where it was");
+    assert_ne!(field_rect(&h, "name"), name, "the dragged field moved");
+}
+
+/// With Prepare open, a drag with a shape tool on the page's empty part draws Prepare's selection
+/// rectangle and no comment, as before: Prepare takes the press nobody holds. It used to draw both.
+#[test]
+fn with_prepare_open_a_shape_tool_drag_draws_no_comment() {
+    let mut h = harness();
+    h.state_mut().execute("form.prepare");
+    h.run_steps(3);
+    assert!(h.state_mut().execute("comment.square"));
+    h.run_steps(3);
+    assert!(h.state().is_preparing(), "picking the tool leaves Prepare open");
+    // Below the fields.
+    let (from, to) = (at(&h, 40.0, 260.0), at(&h, 200.0, 360.0));
+    drag(&mut h, from, to);
+    let s = h.state();
+    let squares = s.session.get(s.views[0].id).unwrap().info.annotations.iter().filter(|a| a.subtype == "Square").count();
+    assert_eq!(squares, 0, "no rectangle under Prepare's selection rectangle");
+}
+
+/// With Prepare open, a double-click on a field is the field's (it opens its properties) and leaves
+/// a polygon being clicked out unfinished, as before. It used to finish the polygon too.
+#[test]
+fn with_prepare_open_a_double_click_on_a_field_leaves_the_polygon_unfinished() {
+    let mut h = harness();
+    h.state_mut().execute("form.prepare");
+    h.run_steps(3);
+    assert!(h.state_mut().execute("comment.polygon"));
+    h.run_steps(3);
+    // Three points below the fields.
+    for (x, y) in [(40.0, 260.0), (200.0, 260.0), (120.0, 360.0)] {
+        let p = at(&h, x, y);
+        h.hover_at(p);
+        h.run_steps(1);
+        h.drag_at(p);
+        h.run_steps(1);
+        h.drop_at(p);
+        h.run_steps(3);
+    }
+    let on_field = field_rect(&h, "name").center();
+    crate::support::input::double_click(&mut h, on_field);
+    let s = h.state();
+    let polygons = s.session.get(s.views[0].id).unwrap().info.annotations.iter().filter(|a| a.subtype == "Polygon").count();
+    assert_eq!(polygons, 0, "the polygon is not finished");
+    assert!(matches!(s.views[0].comments.gesture, Some(pdfcraft_ui_egui::comments::Gesture::Draw { .. })), "it is still being clicked out");
 }

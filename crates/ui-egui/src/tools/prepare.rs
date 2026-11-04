@@ -13,7 +13,7 @@ use pdfcraft_render::DocInfo;
 use crate::canvas::{DocView, PageToolContext, PageXform};
 use crate::comments;
 use crate::page_cursor::Layer;
-use crate::page_router::{Hit, Owner};
+use crate::page_router::{Hit, Owner, PagePress};
 use crate::theme;
 use crate::widgets;
 
@@ -147,6 +147,8 @@ enum Grab {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PrepareView {
+    /// Show each fillable widget's position in the same order used by Tab and Shift+Tab.
+    pub show_tab_numbers: bool,
     /// The selected field and which of its widgets (the anchor of Align and Match Size).
     pub selected: Option<(String, usize)>,
     /// More fields selected with Shift- or ⌘-click.
@@ -242,6 +244,39 @@ fn dragged(r: Rect, grab: Grab, delta: egui::Vec2, shift: bool) -> Rect {
     }
 }
 
+fn tab_badge_rect(widget: Rect, page: Rect, size: egui::Vec2) -> Option<Rect> {
+    if !page.is_positive() || !size.is_finite() || size.x < 0.0 || size.y < 0.0 || size.x > page.width() || size.y > page.height() {
+        return None;
+    }
+    let max_x = page.right() - size.x;
+    let max_y = page.bottom() - size.y;
+    let min = egui::pos2((widget.left() + 3.0).clamp(page.left(), max_x), (widget.top() + 3.0).clamp(page.top(), max_y));
+    Some(Rect::from_min_size(min, size))
+}
+
+fn place_tab_badge(widget: Rect, page: Rect, size: egui::Vec2, placed: &[Rect]) -> Option<Rect> {
+    let preferred = tab_badge_rect(widget, page, size)?;
+    if placed.iter().all(|badge| !badge.intersects(preferred)) {
+        return Some(preferred);
+    }
+
+    let gap = 2.0;
+    let step = size + vec2(gap, gap);
+    let columns = (((page.width() - size.x) / step.x).floor().max(0.0) as usize).saturating_add(1);
+    let rows = (((page.height() - size.y) / step.y).floor().max(0.0) as usize).saturating_add(1);
+    let attempts = columns.saturating_mul(rows).min(placed.len().saturating_add(1));
+    for slot in 0..attempts {
+        let col = slot % columns;
+        let row = slot / columns;
+        let min = page.min + vec2(col as f32 * step.x, row as f32 * step.y);
+        let candidate = Rect::from_min_size(min, size);
+        if placed.iter().all(|badge| !badge.intersects(candidate)) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 pub(crate) struct Outcome {
     /// The click or drag belonged to Prepare a form.
     pub consumed: bool,
@@ -285,8 +320,17 @@ pub(crate) fn hit(
     Some(Hit::new(Owner::PrepareField { field, widget }, Layer::Placed, egui::CursorIcon::Move))
 }
 
-/// Pointer input on one page while preparing a form.
-pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], tool: Option<FieldTool>, allowed: bool, view: &mut DocView) -> Outcome {
+/// Pointer input on one page while preparing a form: `press` says whether the press is a field's
+/// or a corner's ([`hit`]), nobody's (a field tool draws, the Select tool draws a selection
+/// rectangle), or another page's.
+pub(crate) fn page_input(
+    cx: PageToolContext<'_>,
+    form: &[FormField],
+    tool: Option<FieldTool>,
+    allowed: bool,
+    press: PagePress,
+    view: &mut DocView,
+) -> Outcome {
     let PageToolContext { ui, resp, xf, ptr, page, info, .. } = cx;
     let mut out = Outcome { consumed: false, properties: false, placed: false, table: None };
     let pointer = ptr.pos;
@@ -369,71 +413,30 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], tool: Opti
         return out;
     }
 
-    let Some(p) = pointer.filter(|p| xf.rect.contains(*p)) else { return out };
-    if !allowed {
-        return out;
-    }
-    if let Some(tool) = tool {
-        view.cursor.claim(Layer::ToolArea, egui::CursorIcon::Crosshair);
-        if resp.drag_started() || resp.clicked() {
-            let origin = ptr.origin.filter(|o| xf.rect.contains(*o)).unwrap_or(p);
-            prep.grab = Some((page, Grab::Draw(origin), origin));
-            out.consumed = true;
-            if resp.clicked() {
-                // A click without a drag: finish at once.
-                prep.grab = None;
-                if tool == FieldTool::TextTable {
-                    out.table = Some((page, table_rect(xf, Rect::from_min_size(p, egui::Vec2::ZERO))));
-                    out.placed = true;
-                    return out;
-                }
-                let at = to_user(xf, info, page, p);
-                let (w, h) = tool.default_size();
-                let join = prep.selected.as_ref().and_then(|(n, _)| form.iter().find(|f| &f.name == n));
-                prep.select_added = Some(form.len());
-                view.pending_edit = Some(Edit::AddField { page, rect: [at[0], at[1] - h, at[0] + w, at[1]], kind: tool.new_field(join), name: None });
-                out.placed = true;
-            }
-        }
-        return out;
-    }
-
-    // Right-click a field: select it (the context menu acts on it).
-    if resp.secondary_clicked()
-        && let Some((f, wi)) = form.iter().find_map(|f| {
-            f.widgets.iter().enumerate().find(|(_, w)| w.page == Some(page) && screen_rect(xf, info, page, w.rect).contains(p)).map(|(i, _)| (f, i))
-        })
-    {
-        let key = (f.name.clone(), wi);
-        if let Some(i) = prep.also.iter().position(|k| *k == key) {
-            // Part of the selection: it becomes the anchor the others line up with.
-            prep.also.remove(i);
-            if let Some(old) = prep.selected.replace(key) {
-                prep.also.push(old);
-            }
-        } else if prep.selected.as_ref() != Some(&key) {
-            prep.selected = Some(key);
-            prep.also.clear();
-        }
-    }
-    // The Select tool: what the press was on ([`hit`]), a corner handle or a field; elsewhere a
-    // drag draws a selection rectangle. A press held by something drawn over the fields (a
-    // comment) is not Prepare's.
-    let owner = view.router.owner(page);
-    let held = matches!(owner, Some(Owner::PrepareField { .. } | Owner::PrepareCorner { .. }));
-    let hit = match owner {
-        Some(Owner::PrepareField { field, widget }) => form.get(field).map(|f| (f, widget)),
+    // The Select tool: what the press is on ([`hit`]), a corner handle or a field; a press nobody
+    // holds draws a selection rectangle, or a field with a field tool. A press held by something
+    // drawn over the fields (a comment) is not Prepare's.
+    let free = press == PagePress::Free;
+    let held = matches!(press, PagePress::Mine(Owner::PrepareField { .. } | Owner::PrepareCorner { .. }));
+    let hit = match press {
+        PagePress::Mine(Owner::PrepareField { field, widget }) => form.get(field).map(|f| (f, widget)),
         _ => None,
     };
-    if resp.drag_started() && (held || owner.is_none()) {
-        let origin = ptr.origin.unwrap_or(p);
-        if let Some(Owner::PrepareCorner { left, top }) = owner {
+    // A drag starts from where its press began on this page: egui may see it only once the pointer
+    // is past the page's edge.
+    if allowed
+        && resp.drag_started()
+        && (held || free)
+        && let Some(origin) = ptr.origin.filter(|o| xf.rect.contains(*o))
+    {
+        out.consumed = true;
+        if tool.is_some() {
+            prep.grab = Some((page, Grab::Draw(origin), origin));
+        } else if let PagePress::Mine(Owner::PrepareCorner { left, top }) = press {
             prep.grab = Some((page, Grab::Corner(left, top), origin));
-            out.consumed = true;
         } else if let Some((f, wi)) = hit {
             prep.selected = Some((f.name.clone(), wi));
             prep.grab = Some((page, Grab::Move, origin));
-            out.consumed = true;
         } else {
             prep.marquee_before = Some(prep.selected.iter().chain(prep.also.iter()).cloned().collect());
             if !ui.input(|i| i.modifiers.shift || i.modifiers.command) {
@@ -441,7 +444,29 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], tool: Opti
                 prep.also.clear();
             }
             prep.grab = Some((page, Grab::Select(origin), origin));
+        }
+        return out;
+    }
+    let Some(p) = pointer.filter(|p| xf.rect.contains(*p)) else { return out };
+    if !allowed {
+        return out;
+    }
+    if let Some(tool) = tool {
+        view.cursor.claim(Layer::ToolArea, egui::CursorIcon::Crosshair);
+        // A click without a drag places the field at once.
+        if free && resp.clicked() {
             out.consumed = true;
+            if tool == FieldTool::TextTable {
+                out.table = Some((page, table_rect(xf, Rect::from_min_size(p, egui::Vec2::ZERO))));
+                out.placed = true;
+                return out;
+            }
+            let at = to_user(xf, info, page, p);
+            let (w, h) = tool.default_size();
+            let join = prep.selected.as_ref().and_then(|(n, _)| form.iter().find(|f| &f.name == n));
+            prep.select_added = Some(form.len());
+            view.pending_edit = Some(Edit::AddField { page, rect: [at[0], at[1] - h, at[0] + w, at[1]], kind: tool.new_field(join), name: None });
+            out.placed = true;
         }
         return out;
     }
@@ -450,7 +475,7 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], tool: Opti
         out.properties = true;
         return out;
     }
-    if resp.clicked() && (held || owner.is_none()) {
+    if resp.clicked() && (held || free) {
         let extend = ui.input(|i| i.modifiers.shift || i.modifiers.command);
         match hit {
             // Shift/⌘-click adds or removes a field from the selection.
@@ -467,6 +492,28 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, form: &[FormField], tool: Opti
     }
     out.consumed |= held;
     out
+}
+
+/// A right-click on widget `widget` of field `field` (the top hit there, [`hit`]): the field is
+/// selected, so the menu acts on it. Part of a selection of several, it becomes the anchor the
+/// others line up with. Not while a field is dragged or a rectangle drawn: the release acts on
+/// the selection the drag began with.
+pub(crate) fn context(form: &[FormField], field: usize, widget: usize, view: &mut DocView) {
+    let Some(f) = form.get(field) else { return };
+    let key = (f.name.clone(), widget);
+    let prep = &mut view.prepare;
+    if prep.grab.is_some() || prep.ignore_release {
+        return;
+    }
+    if let Some(i) = prep.also.iter().position(|k| *k == key) {
+        prep.also.remove(i);
+        if let Some(old) = prep.selected.replace(key) {
+            prep.also.push(old);
+        }
+    } else if prep.selected.as_ref() != Some(&key) {
+        prep.selected = Some(key);
+        prep.also.clear();
+    }
 }
 
 /// Align, Center, Distribute and Set Fields to Same Size (Prepare a form, several fields
@@ -566,7 +613,7 @@ pub fn arrange(form: &[FormField], anchor: &(String, usize), others: &[(String, 
 
 /// Fields with their light-blue fill and name tags, the selection with its handles, and the
 /// rectangle being drawn or dragged to the pages' `pointer`.
-pub(crate) fn paint_page(cx: PageToolContext<'_>, form: &[FormField], view: &DocView) {
+pub(crate) fn paint_page(cx: PageToolContext<'_>, form: &[FormField], tab_order: &[(usize, usize)], view: &DocView) {
     let PageToolContext { ui, xf, page, info, ptr, .. } = cx;
     let painter = ui.painter();
     let pointer = ptr.pos;
@@ -605,6 +652,29 @@ pub(crate) fn paint_page(cx: PageToolContext<'_>, form: &[FormField], view: &Doc
                     painter.circle(c, 3.5, Color32::WHITE, Stroke::new(1.5, SELECT_BLUE));
                 }
             }
+        }
+    }
+    if prep.show_tab_numbers {
+        let mut placed = Vec::new();
+        for (number, (fi, wi)) in tab_order.iter().copied().enumerate() {
+            let Some(field) = form.get(fi) else { continue };
+            let Some(widget) = field.widgets.get(wi) else { continue };
+            if widget.page != Some(page) {
+                continue;
+            }
+            let mut r = screen_rect(xf, info, page, widget.rect);
+            let selected = prep.selected.as_ref().is_some_and(|(name, index)| name == &field.name && *index == wi);
+            if selected && let (Some((_, grab, start)), Some(pointer)) = (grab, pointer) {
+                r = dragged(r, grab, pointer - start, ui.input(|i| i.modifiers.shift));
+            }
+            let label = number.saturating_add(1).to_string();
+            let font = theme::semibold((10.0 * zoom).clamp(8.0, 14.0));
+            let galley = painter.layout_no_wrap(label, font, Color32::WHITE);
+            let Some(badge) = place_tab_badge(r, xf.rect, galley.size() + vec2(8.0, 5.0), &placed) else { continue };
+            placed.push(badge);
+            let clipped = painter.with_clip_rect(painter.clip_rect().intersect(xf.rect));
+            clipped.rect_filled(badge, CornerRadius::same(3), SELECT_BLUE);
+            clipped.galley(badge.min + vec2(4.0, 2.0), galley, Color32::WHITE);
         }
     }
     if let (Some((_, Grab::Draw(from) | Grab::Select(from), _)), Some(p)) = (grab, pointer) {
@@ -766,5 +836,38 @@ mod tests {
             assert_eq!(if top { out.max.y } else { out.min.y }, if top { r.max.y } else { r.min.y });
         }
         assert_eq!(dragged(r, Grab::Move, vec2(5.0, 6.0), true), r.translate(vec2(5.0, 6.0)));
+    }
+
+    #[test]
+    fn tab_badge_rect_tracks_dragged_rect_and_clamps_to_page_edges() {
+        let page = Rect::from_min_size(pos2(10.0, 20.0), vec2(100.0, 80.0));
+        let widget = Rect::from_min_size(pos2(30.0, 40.0), vec2(20.0, 15.0));
+        let size = vec2(24.0, 14.0);
+        let original = tab_badge_rect(widget, page, size).unwrap();
+        let moved = dragged(widget, Grab::Move, vec2(12.0, 8.0), false);
+        assert_eq!(tab_badge_rect(moved, page, size).unwrap().min, original.min + vec2(12.0, 8.0));
+
+        let near_edge = Rect::from_min_size(pos2(100.0, 95.0), vec2(8.0, 8.0));
+        let badge = tab_badge_rect(near_edge, page, size).unwrap();
+        assert!(page.contains_rect(badge));
+    }
+
+    #[test]
+    fn tab_badge_is_omitted_when_it_cannot_fit_on_the_page() {
+        let page = Rect::from_min_size(pos2(10.0, 20.0), vec2(20.0, 12.0));
+        let widget = Rect::from_min_size(pos2(10.0, 20.0), vec2(4.0, 4.0));
+        assert_eq!(tab_badge_rect(widget, page, vec2(24.0, 14.0)), None);
+    }
+
+    #[test]
+    fn tab_badges_near_the_right_edge_do_not_overlap() {
+        let page = Rect::from_min_size(pos2(10.0, 20.0), vec2(100.0, 80.0));
+        let size = vec2(24.0, 14.0);
+        let first_widget = Rect::from_min_size(pos2(104.0, 45.0), vec2(8.0, 8.0));
+        let second_widget = Rect::from_min_size(pos2(106.0, 45.0), vec2(8.0, 8.0));
+        let first = place_tab_badge(first_widget, page, size, &[]).unwrap();
+        let second = place_tab_badge(second_widget, page, size, &[first]).unwrap();
+        assert!(!first.intersects(second), "{first:?} overlaps {second:?}");
+        assert!(page.contains_rect(first) && page.contains_rect(second));
     }
 }
