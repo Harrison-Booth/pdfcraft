@@ -5,6 +5,9 @@ fn fields() -> Vec<FieldState> {
     agree.options = vec![("Yes".into(), "Yes".into())];
     let mut size = FieldState::new("size", FieldType::ComboBox, vec!["m".into()]);
     size.options = vec![("s".into(), "Small".into()), ("m".into(), "Medium".into()), ("l".into(), "Large".into())];
+    size.current_value_indices = vec![1];
+    let mut comb = FieldState::new("comb", FieldType::Text, vec!["123".into()]);
+    comb.is_comb = true;
     vec![
         FieldState::new("price", FieldType::Text, vec!["12.5".into()]),
         FieldState::new("qty", FieldType::Text, vec!["4".into()]),
@@ -12,6 +15,7 @@ fn fields() -> Vec<FieldState> {
         FieldState::new("zip", FieldType::Text, vec!["02134".into()]),
         agree,
         size,
+        comb,
     ]
 }
 
@@ -81,6 +85,16 @@ fn choice_and_check_box_object_model() {
         &Event::field("Calculate", "total", ""),
     );
     assert_eq!(o.value, "3|Large|1|m|Off|false|combobox");
+}
+
+#[test]
+fn current_value_indices_are_derived_for_unindexed_choice_fields() {
+    let mut size = FieldState::new("size", FieldType::ComboBox, vec!["m".into()]);
+    size.options = vec![("s".into(), "Small".into()), ("m".into(), "Medium".into()), ("l".into(), "Large".into())];
+    let o =
+        run("event.value = getField('size').currentValueIndices;", &Event::field("Calculate", "total", ""), &doc(), &[size], &[], Limits::default());
+    assert_eq!(o.error, None);
+    assert_eq!(o.value, "1");
 }
 
 #[test]
@@ -1024,6 +1038,20 @@ mod formcalc {
         assert_eq!(calc(r#"Format("9.9", -0.04)"#), "0.0");
         assert_eq!(calc(r#"Format("99", -0.2)"#), "00");
         assert_eq!(calc(r#"Format("9.9", -1.5)"#), "-1.5");
+    }
+
+    /// A calculated amount shows the number it is, not the binary noise past a double's 15
+    /// significant digits: 279893.88 is stored as 279893.880000000004656…, which twelve fixed
+    /// decimals printed as `279893.880000000005`. Small values keep their twelve decimals.
+    #[test]
+    fn calculated_numbers_print_at_most_fifteen_significant_digits() {
+        assert_eq!(calc("1 * 279893.88"), "279893.88");
+        assert_eq!(calc("1 * 291774.12"), "291774.12");
+        assert_eq!(calc("279893.88 + 291774.12 + 304171.06 + 317107.44 + 273970.85"), "1466917.35");
+        assert_eq!(calc("1000000 / 3"), "333333.333333333");
+        assert_eq!(calc("1000 / 3"), "333.333333333333");
+        assert_eq!(calc("1 / 3"), "0.333333333333");
+        assert_eq!(calc("0.1 + 0.2"), "0.3");
     }
 
     /// Assigning one long value to many fields at once stops at the run's byte budget and is
@@ -2057,4 +2085,97 @@ fn a_plain_form_sees_the_xfa_version_but_not_installed() {
     assert_eq!(o.error, None);
     assert_eq!(o.value, "undefined number 3.5");
     assert_eq!(o.alerts, [Message::plain("old viewer")]);
+}
+#[test]
+fn field_choice_index_setter_maps_options_and_rejects_bad_indices() {
+    let o = go(
+        "var s=getField('size'); s.currentValueIndices=2; event.value=[getField('size').value,getField('size').currentValueIndices].join('|');",
+        &Event::field("Mouse Up", "size", ""),
+    );
+    assert_eq!(o.error, None);
+    assert_eq!(o.value, "l|2");
+    let size = o.changed.iter().find(|f| f.name == "size").unwrap();
+    assert_eq!(size.value, ["l"]);
+    for script in [
+        "getField('size').currentValueIndices=NaN",
+        "getField('size').currentValueIndices=Infinity",
+        "getField('size').currentValueIndices=-1",
+        "getField('size').currentValueIndices=1.5",
+        "getField('size').currentValueIndices=3",
+    ] {
+        let rejected = go(script, &Event::doc("Open"));
+        assert!(rejected.error.is_some(), "accepted {script}");
+        assert!(rejected.changed.is_empty(), "mutated on refusal: {script}");
+    }
+    let rejected = go("getField('size').currentValueIndices=[0,2]", &Event::doc("Open"));
+    assert!(rejected.error.is_some(), "accepted multiple combo-box selections");
+    assert!(rejected.changed.is_empty(), "mutated on refused multiple combo-box selections");
+}
+
+#[test]
+fn choice_index_setter_preserves_the_selection_when_exports_repeat() {
+    let mut fields = fields();
+    let size = fields.iter_mut().find(|f| f.name == "size").unwrap();
+    size.value = vec!["same".into()];
+    size.options = vec![("same".into(), "First".into()), ("same".into(), "Second".into())];
+    size.current_value_indices = vec![0];
+    let o = run(
+        "var s=getField('size'); s.currentValueIndices=1; event.value=s.value+'|'+s.currentValueIndices;",
+        &Event::field("Mouse Up", "size", ""),
+        &doc(),
+        &fields,
+        &[],
+        Limits::default(),
+    );
+    assert_eq!(o.error, None);
+    assert_eq!(o.value, "same|1");
+    assert_eq!(o.changed.iter().find(|f| f.name == "size").unwrap().current_value_indices, [1]);
+}
+
+#[test]
+fn assigning_a_combo_value_keeps_its_matching_duplicate_export_index() {
+    let mut fields = fields();
+    let size = fields.iter_mut().find(|f| f.name == "size").unwrap();
+    size.value = vec!["same".into()];
+    size.options = vec![("same".into(), "First".into()), ("same".into(), "Second".into())];
+    size.current_value_indices = vec![1];
+    let o = run(
+        "var s=getField('size'); s.value='same'; event.value=s.currentValueIndices;",
+        &Event::field("Mouse Up", "size", ""),
+        &doc(),
+        &fields,
+        &[],
+        Limits::default(),
+    );
+    assert_eq!(o.error, None);
+    assert_eq!(o.value, "1");
+    assert_eq!(o.changed.iter().find(|f| f.name == "size").unwrap().current_value_indices, [1]);
+}
+
+#[test]
+fn default_value_setter_is_live() {
+    let o = go("var q=getField('qty'); q.defaultValue='9'; event.value=getField('qty').defaultValue;", &Event::doc("Open"));
+    assert_eq!(o.error, None);
+    assert_eq!(o.value, "9");
+    assert_eq!(o.changed.iter().find(|f| f.name == "qty").unwrap().default, ["9"]);
+}
+
+#[test]
+fn char_limit_setter_is_bounded_and_text_only() {
+    let o = go("var q=getField('qty'); q.charLimit=3; event.value=getField('qty').charLimit;", &Event::doc("Open"));
+    assert_eq!(o.error, None);
+    assert_eq!(o.value, "3");
+    assert_eq!(o.changed.iter().find(|f| f.name == "qty").unwrap().char_limit, Some(3));
+    for script in [
+        "getField('qty').charLimit=-1",
+        "getField('qty').charLimit=1.5",
+        "getField('qty').charLimit=NaN",
+        "getField('qty').charLimit=1e100",
+        "getField('size').charLimit=3",
+        "getField('comb').charLimit=0",
+    ] {
+        let rejected = go(script, &Event::doc("Open"));
+        assert!(rejected.error.is_some(), "accepted {script}");
+        assert!(rejected.changed.is_empty(), "mutated on refusal: {script}");
+    }
 }
