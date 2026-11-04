@@ -7414,6 +7414,57 @@ fn javascript_through_tools() {
 }
 
 #[test]
+fn current_value_indices_write_choices_and_survive_history_and_save() {
+    let dir = workdir("js-choice-indices");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(
+        &mut a,
+        "form_add_field",
+        json!({ "doc": doc, "page": 1, "type": "combo", "rect": [20, 20, 180, 42], "name": "single", "options": ["A", "B", "C"] }),
+    );
+    ok(
+        &mut a,
+        "form_add_field",
+        json!({ "doc": doc, "page": 1, "type": "list", "rect": [20, 50, 180, 130], "name": "multi", "options": ["A", "B", "C"], "multi_select": true }),
+    );
+
+    let result = ok(
+        &mut a,
+        "js_run",
+        json!({ "doc": doc, "script": "getField('single').currentValueIndices = 2; getField('multi').currentValueIndices = [2, 0];" }),
+    );
+    assert_eq!(result["error"], json!(null));
+    let fields = ok(&mut a, "form_fields", json!({ "doc": doc }))["fields"].as_array().unwrap().clone();
+    assert_eq!(fields.iter().find(|f| f["name"] == "single").unwrap()["value"], "C");
+    assert_eq!(fields.iter().find(|f| f["name"] == "multi").unwrap()["value"], json!(["A", "C"]));
+    let readback = ok(
+        &mut a,
+        "js_run",
+        json!({ "doc": doc, "script": "String(getField('single').currentValueIndices) + ':' + getField('multi').currentValueIndices.join(',')" }),
+    );
+    assert_eq!(readback["result"], "2:0,2");
+
+    let invalid = ok(&mut a, "js_run", json!({ "doc": doc, "script": "getField('single').currentValueIndices = NaN;" }));
+    assert!(invalid["error"].as_str().unwrap().starts_with("TypeError:"));
+    ok(&mut a, "edit_undo", json!({ "doc": doc }));
+    let undone = ok(&mut a, "form_fields", json!({ "doc": doc }))["fields"].as_array().unwrap().clone();
+    assert!(undone.iter().find(|f| f["name"] == "single").unwrap()["value"].is_null());
+    ok(&mut a, "edit_redo", json!({ "doc": doc }));
+    ok(&mut a, "doc_save", json!({ "doc": doc }));
+    let reopened = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    let fields = ok(&mut a, "form_fields", json!({ "doc": reopened }))["fields"].as_array().unwrap().clone();
+    assert_eq!(fields.iter().find(|f| f["name"] == "single").unwrap()["value"], "C");
+    assert_eq!(fields.iter().find(|f| f["name"] == "multi").unwrap()["value"], json!(["A", "C"]));
+    let readback = ok(
+        &mut a,
+        "js_run",
+        json!({ "doc": reopened, "script": "String(getField('single').currentValueIndices) + ':' + getField('multi').currentValueIndices.join(',')" }),
+    );
+    assert_eq!(readback["result"], "2:0,2");
+}
+
+#[test]
 fn merging_form_data_into_a_spreadsheet() {
     let dir = workdir("merge-data");
     let mut a = auto(&dir);

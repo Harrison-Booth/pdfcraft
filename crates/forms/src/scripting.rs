@@ -38,6 +38,8 @@ impl FieldEvent {
 pub struct FieldChange {
     pub name: String,
     pub value: Option<Vec<String>>,
+    /// Exact choice option positions selected by `currentValueIndices`, preserving duplicate exports.
+    pub choice_indices: Option<Vec<usize>>,
     pub read_only: Option<bool>,
     pub required: Option<bool>,
     /// `display.visible` 0, `hidden` 1, `noPrint` 2, `noView` 3.
@@ -123,6 +125,27 @@ pub(crate) fn apply_changes(doc: &mut Document, changes: &[FieldChange], except:
             tmp.flags &= !flags::NO_TOGGLE_TO_OFF;
             tmp.actions = Default::default();
             crate::write_value(doc, &tmp, &value, &mut NoScripts)?;
+        }
+        if let Some(indices) = &c.choice_indices {
+            if !matches!(f.kind, FieldKind::Combo | FieldKind::List) || indices.iter().any(|&i| i >= f.options.len()) {
+                return Err(FormError::Invalid(format!("{:?} has invalid choice indices", f.name)));
+            }
+            let mut indices = indices.clone();
+            indices.sort_unstable();
+            indices.dedup();
+            let pdf_indices = indices
+                .iter()
+                .map(|&i| {
+                    i64::try_from(i).map(Object::Int).map_err(|_| FormError::Invalid(format!("{:?} has an unrepresentable choice index", f.name)))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            doc.update_dict(f.obj, |d| {
+                if indices.is_empty() {
+                    d.remove(b"I");
+                } else {
+                    d.set(b"I".to_vec(), Object::Array(pdf_indices));
+                }
+            })?;
         }
         let mut ff = f.flags;
         for (on, bit) in [(c.read_only, flags::READ_ONLY), (c.required, flags::REQUIRED)] {

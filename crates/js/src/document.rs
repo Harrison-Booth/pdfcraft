@@ -73,9 +73,56 @@ pub(crate) fn field_object(ctx: &mut Context, name: &str) -> JsObject {
         JsArray::from_iter(vals, c).into()
     });
     let indices = getter!(ctx, n, |f, c| {
-        let idx: Vec<JsValue> = f.options.iter().enumerate().filter(|(_, o)| f.value.contains(&o.0)).map(|(i, _)| JsValue::from(i as f64)).collect();
+        let idx: Vec<JsValue> = f
+            .current_value_indices
+            .clone()
+            .unwrap_or_else(|| f.options.iter().enumerate().filter(|(_, o)| f.value.contains(&o.0)).map(|(i, _)| i).collect())
+            .into_iter()
+            .map(|i| JsValue::from(i as f64))
+            .collect();
         if idx.len() == 1 { idx[0].clone() } else { JsArray::from_iter(idx, c).into() }
     });
+    let indices_set = {
+        fn set(_: &JsValue, args: &[JsValue], name: &JsString, c: &mut Context) -> JsResult<JsValue> {
+            let f = read(c, name)?;
+            if !matches!(f.kind, FieldType::ComboBox | FieldType::ListBox) {
+                return Err(error(format!("{} has no choice indices", f.name)));
+            }
+            let raw = arg(args, 0);
+            let mut values = Vec::new();
+            if let Some(o) = raw.as_object().filter(|o| o.is_array()) {
+                let a = JsArray::from_object(o.clone())?;
+                let len = a.length(c)?;
+                if len > super::run::MAX_ARRAY_LENGTH {
+                    return Err(error(format!("array length exceeds {}", super::run::MAX_ARRAY_LENGTH)));
+                }
+                for i in 0..len {
+                    let v = a.get(i, c)?.to_number(c)?;
+                    values.push(option_index(v, f.options.len(), &f.name)?);
+                }
+            } else if !raw.is_undefined() && !raw.is_null() {
+                values.push(option_index(raw.to_number(c)?, f.options.len(), &f.name)?);
+            }
+            values.sort_unstable();
+            values.dedup();
+            if f.kind == FieldType::ComboBox && values.len() > 1 {
+                return Err(error(format!("{} takes a single choice index", f.name)));
+            }
+            let selected = values.iter().filter_map(|&i| f.options.get(i).map(|o| o.0.clone())).collect();
+            write(c, name, |f| {
+                f.value = selected;
+                f.current_value_indices = Some(values);
+            })?;
+            Ok(JsValue::undefined())
+        }
+        fn option_index(n: f64, len: usize, name: &str) -> JsResult<usize> {
+            if !n.is_finite() || n < 0.0 || n.fract() != 0.0 || n >= len as f64 {
+                return Err(error(format!("{name} has no option index {n}")));
+            }
+            Ok(n as usize)
+        }
+        function(ctx, NativeFunction::from_copy_closure_with_captures(set, n.clone()))
+    };
     let text_color_get = getter!(ctx, n, |f, c| colour(&f.text_color, c));
     let text_color_set = {
         fn set(_: &JsValue, args: &[JsValue], name: &JsString, c: &mut Context) -> JsResult<JsValue> {
@@ -147,7 +194,7 @@ pub(crate) fn field_object(ctx: &mut Context, name: &str) -> JsObject {
         .accessor(js_string!("numItems"), Some(num_items), None, rw)
         .accessor(js_string!("charLimit"), Some(char_limit), None, rw)
         .accessor(js_string!("exportValues"), Some(export_values), None, rw)
-        .accessor(js_string!("currentValueIndices"), Some(indices), None, rw)
+        .accessor(js_string!("currentValueIndices"), Some(indices), Some(indices_set), rw)
         .accessor(js_string!("textColor"), Some(text_color_get), Some(text_color_set), rw)
         .accessor(js_string!("fillColor"), Some(fill_color_get), Some(fill_color_set), rw)
         .function(get_item_at, js_string!("getItemAt"), 2)

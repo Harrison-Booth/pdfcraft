@@ -199,4 +199,5 @@ pub(crate) fn set_value(f: &mut FieldState, vals: Vec<String>) {
         FieldType::ListBox => vals,
         _ => vals.into_iter().take(1).collect(),
     };
+    f.current_value_indices = None;
 }

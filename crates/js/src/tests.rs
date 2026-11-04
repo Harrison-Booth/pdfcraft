@@ -84,6 +84,47 @@ fn choice_and_check_box_object_model() {
 }
 
 #[test]
+fn current_value_indices_select_single_and_multiple_options() {
+    let mut f = fields();
+    let mut list = FieldState::new("list", FieldType::ListBox, vec![]);
+    list.options = vec![("a".into(), "A".into()), ("b".into(), "B".into()), ("c".into(), "C".into())];
+    f.push(list);
+    let o = run(
+        "getField('size').currentValueIndices = 2; getField('list').currentValueIndices = [2, 0];",
+        &Event::doc("Console"),
+        &doc(),
+        &f,
+        &[],
+        Limits::default(),
+    );
+    assert_eq!(o.error, None);
+    assert_eq!(o.changed.iter().find(|f| f.name == "size").map(|f| f.value.as_slice()), Some(["l".to_string()].as_slice()));
+    let list = o.changed.iter().find(|f| f.name == "list").unwrap();
+    assert_eq!(list.value, ["a", "c"]);
+    assert_eq!(list.current_value_indices, Some(vec![0, 2]));
+}
+
+#[test]
+fn current_value_indices_refuse_invalid_input_without_a_change() {
+    for expression in ["-1", "1.5", "NaN", "Infinity", "3", "[0, 1.5]"] {
+        let o = go(&format!("getField('size').currentValueIndices = {expression};"), &Event::doc("Console"));
+        assert!(o.error.as_deref().is_some_and(|e| e.starts_with("TypeError:")), "{expression}: {:?}", o.error);
+        assert!(o.changed.is_empty(), "{expression}");
+    }
+    let o = go("getField('total').currentValueIndices = 0;", &Event::doc("Console"));
+    assert!(o.error.is_some());
+    assert!(o.changed.is_empty());
+}
+
+#[test]
+fn assigning_a_field_value_after_indices_uses_the_value_selection() {
+    let o = go("var f = getField('size'); f.currentValueIndices = 2; f.value = 's';", &Event::doc("Console"));
+    let changed = o.changed.iter().find(|f| f.name == "size").unwrap();
+    assert_eq!(changed.value, ["s"]);
+    assert_eq!(changed.current_value_indices, None);
+}
+
+#[test]
 fn util_printf_printd_and_printx() {
     let o = go(
         "event.value = [util.printf('%,0.2f', 1234567.891), util.printf('%05d|%s|%x', 42, 'hi', 255), util.printf('%,2.2f', 1234.5), \

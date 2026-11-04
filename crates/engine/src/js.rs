@@ -109,7 +109,17 @@ fn display(doc: &pdfcraft_cos::Document, f: &Field) -> i32 {
 
 /// A form field as scripts see it.
 pub fn field_state(doc: &pdfcraft_cos::Document, f: &Field) -> pdfcraft_js::FieldState {
-    field_state_with_display(f, display(doc, f))
+    let mut state = field_state_with_display(f, display(doc, f));
+    if matches!(f.kind, FieldKind::Combo | FieldKind::List) {
+        state.current_value_indices = doc.get(f.obj).as_dict().and_then(|d| d.get(b"I").cloned()).map(|raw| {
+            let value = doc.resolve(&raw);
+            value
+                .as_array()
+                .map(|a| a.iter().filter_map(|o| usize::try_from(doc.resolve(o).as_int()?).ok()).filter(|&i| i < f.options.len()).collect())
+                .unwrap_or_default()
+        });
+    }
+    state
 }
 
 fn field_state_with_display(f: &Field, display: i32) -> pdfcraft_js::FieldState {
@@ -144,11 +154,12 @@ fn changes(before: &[pdfcraft_js::FieldState], after: &[pdfcraft_js::FieldState]
             let c = FieldChange {
                 name: a.name.clone(),
                 value: (a.value != b.value).then(|| a.value.clone()),
+                choice_indices: (a.current_value_indices != b.current_value_indices).then(|| a.current_value_indices.clone()).flatten(),
                 read_only: (a.readonly != b.readonly).then_some(a.readonly),
                 required: (a.required != b.required).then_some(a.required),
                 display: (a.display != b.display).then_some(a.display),
             };
-            (c.value.is_some() || c.read_only.is_some() || c.required.is_some() || c.display.is_some()).then_some(c)
+            (c.value.is_some() || c.choice_indices.is_some() || c.read_only.is_some() || c.required.is_some() || c.display.is_some()).then_some(c)
         })
         .collect()
 }

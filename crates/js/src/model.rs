@@ -48,6 +48,8 @@ pub struct FieldState {
     /// Choice options (export value, display text); check boxes and radios: their export
     /// values, one per widget.
     pub options: Vec<(String, String)>,
+    /// Exact selected option positions when a script assigned `currentValueIndices`.
+    pub current_value_indices: Option<Vec<usize>>,
     pub char_limit: Option<usize>,
     /// `textColor` / `fillColor` as Acrobat colour arrays (`["RGB", r, g, b]` etc.), when set.
     pub text_color: Option<Vec<String>>,
@@ -65,6 +67,7 @@ impl FieldState {
             required: false,
             display: DISPLAY_VISIBLE,
             options: Vec::new(),
+            current_value_indices: None,
             char_limit: None,
             text_color: None,
             fill_color: None,
