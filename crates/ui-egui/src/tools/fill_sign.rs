@@ -3,9 +3,10 @@
 //! signature. Everything is an annotation (typewriter text, PdfCraft-drawn stamps, ink), so it
 //! can be moved, deleted and undone like any comment.
 
+use crate::file_filter::AddFilterAnyCase as _;
 use egui::{Color32, CornerRadius, Pos2, Sense, Stroke, pos2, vec2};
 use pdfcraft_engine::signature_scan::{DEFAULT_SENSITIVITY, PREVIEW_MAX_SIDE, SCAN_MAX_SIDE, ScanError};
-use pdfcraft_engine::{Edit, FillMark, NewAnnotation, PhotoRect, Shape, SignatureImage, SignaturePhoto, Style, Turn};
+use pdfcraft_engine::{BorderShape, Edit, FillMark, NewAnnotation, PhotoRect, Rgb, Shape, SignatureImage, SignaturePhoto, Style, Turn};
 use pdfcraft_render::{DocInfo, PageInfo};
 
 use crate::canvas::{DocView, PageToolContext, PageXform};
@@ -38,6 +39,7 @@ pub const FILL_TOOLS: [FillTool; 8] =
 pub enum SavedSig {
     Drawn(Vec<Vec<[f32; 2]>>),
     Typed(String),
+    TypedStyle { text: String, style: pdfcraft_engine::SignatureStyle },
     Image(#[serde(with = "image_data")] SignatureImage),
 }
 
@@ -50,6 +52,7 @@ impl SavedSig {
                 strokes.iter().map(|s| s.iter().map(|p| [f64::from(p[0]), f64::from(p[1])]).collect()).collect(),
             )),
             SavedSig::Typed(text) => pdfcraft_engine::typed_signature_graphic(text),
+            SavedSig::TypedStyle { text, style } => pdfcraft_engine::typed_signature_graphic_with_style(text, *style),
             SavedSig::Image(image) => Some(image.graphic()),
         }
     }
@@ -79,6 +82,7 @@ pub(crate) mod image_data {
 pub struct SigDraft {
     pub strokes: Vec<Vec<[f32; 2]>>,
     pub text: String,
+    pub style: pdfcraft_engine::SignatureStyle,
     /// The Draw tab (otherwise Type).
     pub drawing: bool,
     /// The Image tab. The file is held in the draft until Apply.
@@ -105,6 +109,7 @@ impl SigDraft {
         match saved {
             SavedSig::Drawn(strokes) => Self { strokes: strokes.clone(), drawing: true, initials, editing: true, ..Default::default() },
             SavedSig::Typed(text) => Self { text: text.clone(), initials, editing: true, ..Default::default() },
+            SavedSig::TypedStyle { text, style } => Self { text: text.clone(), style: *style, initials, editing: true, ..Default::default() },
             SavedSig::Image(image) => Self { image: Some(image.clone()), image_mode: true, initials, editing: true, ..Default::default() },
         }
     }
@@ -136,6 +141,7 @@ impl SigDraft {
         } else {
             !self.text.trim().is_empty()
                 && self.text.chars().take(pdfcraft_engine::MAX_SIGNATURE_CHARS + 1).count() <= pdfcraft_engine::MAX_SIGNATURE_CHARS
+                && pdfcraft_engine::signature_missing(self.text.trim(), self.style).is_none()
         }
     }
 
@@ -147,7 +153,10 @@ impl SigDraft {
         } else if self.drawing {
             Some(SavedSig::Drawn(self.strokes.clone()))
         } else {
-            Some(SavedSig::Typed(self.text.trim().to_string()))
+            self.ready().then(|| match self.style {
+                pdfcraft_engine::SignatureStyle::Script => SavedSig::Typed(self.text.trim().to_string()),
+                style => SavedSig::TypedStyle { text: self.text.trim().to_string(), style },
+            })
         }
     }
 }
@@ -214,7 +223,22 @@ pub struct TypeBox {
     pub text: String,
     pub size: f64,
     pub color: [f64; 3],
+    /// The border around the text.
+    pub border: TextBorder,
     pub focus: bool,
+}
+
+/// The border around typed text: its width in points (0: none), its own colour (`None`: the
+/// text's) and its shape (an oval or a circle goes around the text).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TextBorder {
+    pub width: f64,
+    pub color: Option<Rgb>,
+    pub shape: BorderShape,
+}
+
+impl TextBorder {
+    pub const NONE: Self = Self { width: 0.0, color: None, shape: BorderShape::Rectangle };
 }
 
 /// The default size Fill & Sign uses for typed text.
@@ -230,6 +254,14 @@ pub fn valid_text_color(color: [f64; 3]) -> Option<[f64; 3]> {
     color.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)).then_some(color)
 }
 
+/// The borders the toolbar offers around typed text, in points (0: none).
+pub const TEXT_BORDERS: [f64; 6] = [0.0, 0.5, 1.0, 1.5, 2.0, 3.0];
+pub const MAX_TEXT_BORDER: f64 = 12.0;
+
+pub fn valid_text_border(width: f64) -> Option<f64> {
+    (width.is_finite() && (0.0..=MAX_TEXT_BORDER).contains(&width)).then_some(width)
+}
+
 fn to_user(xf: &PageXform, info: &DocInfo, page: usize, p: Pos2) -> [f64; 2] {
     let (vx, vy) = xf.screen_to_view(p);
     let u = info.pages[page].view_to_user(vx, vy);
@@ -242,17 +274,36 @@ fn new(page: usize, shape: Shape, contents: String, author: &str) -> Edit {
 }
 
 /// A typewriter annotation sized to its text, its displayed top-left at `at` on a page turned by
-/// `rotation` (its `/Rotate`).
+/// `rotation` (its `/Rotate`), in black and without a border.
 pub fn typed(page: usize, at: [f64; 2], text: &str, size: f64, rotation: i64, author: &str) -> Edit {
-    typed_with_color(page, at, text, size, rotation, author, [0.0; 3])
+    typed_with(page, at, text, size, rotation, author, TypedLook::default())
 }
 
-/// Typed text/date colour applies to its annotation appearance and survives saving.
-pub fn typed_with_color(page: usize, at: [f64; 2], text: &str, size: f64, rotation: i64, author: &str, color: [f64; 3]) -> Edit {
-    let rect = crate::comments::text_box_rect(at, text, size, rotation);
-    let shape = Shape::Typewriter { rect, font_size: size };
-    let mut style = Style::default_for(&shape);
-    style.color = valid_text_color(color).unwrap_or([0.0; 3]);
+/// How typed text and dates look: their colour, and the border around them.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TypedLook {
+    pub color: [f64; 3],
+    pub border: TextBorder,
+}
+
+/// [`typed`] in `look`: the colour applies to the annotation's appearance and survives saving; a
+/// border goes around the box sized to the text, so the text sits where it would without one.
+pub fn typed_with(page: usize, at: [f64; 2], text: &str, size: f64, rotation: i64, author: &str, look: TypedLook) -> Edit {
+    let width = valid_text_border(look.border.width).unwrap_or(0.0);
+    // A circle goes around the text, so its box is no wider than the text needs.
+    let [x0, y0, x1, y1] = if width > 0.0 && look.border.shape == BorderShape::Circle {
+        crate::comments::snug_text_box_rect(at, text, size, rotation)
+    } else {
+        crate::comments::text_box_rect(at, text, size, rotation)
+    };
+    let shape = Shape::Typewriter { rect: [x0 - width, y0 - width, x1 + width, y1 + width], font_size: size };
+    let style = Style {
+        color: valid_text_color(look.color).unwrap_or([0.0; 3]),
+        width,
+        border_color: look.border.color.filter(|_| width > 0.0),
+        border_shape: if width > 0.0 { look.border.shape } else { BorderShape::Rectangle },
+        ..Style::default_for(&shape)
+    };
     Edit::AddAnnotation(NewAnnotation { page, shape, style, contents: text.to_string(), author: author.to_string() })
 }
 
@@ -286,7 +337,19 @@ pub fn signature_at(page: usize, at: [f64; 2], strokes: &[Vec<[f32; 2]>], rotati
 /// Place typed text in the script font with its left edge at `at`, `height` points tall, upright
 /// as displayed on a page turned by `rotation`.
 pub fn typed_signature_at(page: usize, at: [f64; 2], text: &str, height: f64, rotation: i64, author: &str) -> Option<Edit> {
-    pdfcraft_engine::typed_signature_shape(at, text, height, rotation).map(|shape| new(page, shape, String::new(), author))
+    typed_signature_at_style(page, at, text, height, rotation, author, pdfcraft_engine::SignatureStyle::Script)
+}
+
+fn typed_signature_at_style(
+    page: usize,
+    at: [f64; 2],
+    text: &str,
+    height: f64,
+    rotation: i64,
+    author: &str,
+    style: pdfcraft_engine::SignatureStyle,
+) -> Option<Edit> {
+    pdfcraft_engine::typed_signature_shape_with_style(at, text, height, rotation, style).map(|shape| new(page, shape, String::new(), author))
 }
 
 /// Place a saved signature or initials, upright as `info`'s page is displayed.
@@ -295,19 +358,28 @@ pub fn place(page: usize, info: &PageInfo, at: [f64; 2], sig: &SavedSig, initial
     match sig {
         SavedSig::Drawn(strokes) => signature_at(page, at, strokes, rotation, author),
         SavedSig::Image(image) => image.edit(page, info, at, initials, author),
-        SavedSig::Typed(text) => {
-            let [left, bottom, right, top] = pdfcraft_engine::script_outline(text).bounds();
+        SavedSig::Typed(text) | SavedSig::TypedStyle { text, style: _ } => {
+            let style = match sig {
+                SavedSig::TypedStyle { style, .. } => *style,
+                _ => pdfcraft_engine::SignatureStyle::Script,
+            };
+            let [left, bottom, right, top] = pdfcraft_engine::signature_outline(text, style).bounds();
             let height = if initials { 24.0_f64 } else { 32.0_f64 };
             // Keep long names within the same placement width as drawn signatures.
             let height = height.min(150.0 * (top - bottom).max(0.1) / (right - left).max(0.01));
-            typed_signature_at(page, at, text, height, rotation, author)
+            typed_signature_at_style(page, at, text, height, rotation, author, style)
         }
     }
 }
 
 /// The text in the script font as a picture (`w`×`h` px, black on transparent), for previews.
+#[cfg(test)]
 pub(crate) fn script_preview(text: &str, w: usize, h: usize) -> egui::ColorImage {
-    let o = pdfcraft_engine::script_outline(text);
+    signature_preview(text, pdfcraft_engine::SignatureStyle::Script, w, h)
+}
+
+fn signature_preview(text: &str, style: pdfcraft_engine::SignatureStyle, w: usize, h: usize) -> egui::ColorImage {
+    let o = pdfcraft_engine::signature_outline(text, style);
     let mut img = egui::ColorImage::filled([w, h], Color32::TRANSPARENT);
     let [left, bottom, right, top] = o.bounds();
     let span = (top - bottom).max(0.1);
@@ -355,6 +427,22 @@ pub(crate) fn script_preview(text: &str, w: usize, h: usize) -> egui::ColorImage
     img
 }
 
+fn signature_style_warning(text: &str, style: pdfcraft_engine::SignatureStyle, c: char) -> String {
+    let (style_name, other_style) = match style {
+        pdfcraft_engine::SignatureStyle::Script => (tl!("Script"), pdfcraft_engine::SignatureStyle::Print),
+        pdfcraft_engine::SignatureStyle::Print => (tl!("Print"), pdfcraft_engine::SignatureStyle::Script),
+    };
+    let recommendation = if pdfcraft_engine::signature_missing(text, other_style).is_some() {
+        tl!("use the Image tab")
+    } else {
+        match other_style {
+            pdfcraft_engine::SignatureStyle::Script => tl!("choose Script"),
+            pdfcraft_engine::SignatureStyle::Print => tl!("choose Print"),
+        }
+    };
+    format!("{style_name} can't draw \"{}\" (U+{:04X}); {recommendation}.", c.escape_debug(), u32::from(c))
+}
+
 /// Saved previews and add/remove controls, shared by the left panel and quick-tool picker.
 pub(crate) fn signature_entries(ui: &mut egui::Ui, app: &mut crate::PdfCraftApp, t: &Tokens) -> Option<&'static str> {
     ui.set_width(ui.available_width().clamp(240.0, 248.0));
@@ -373,20 +461,22 @@ pub(crate) fn signature_entries(ui: &mut egui::Ui, app: &mut crate::PdfCraftApp,
             }
             continue;
         };
-        ui.horizontal(|ui| {
+        let on = app.quick_tool == crate::QuickTool::Fill(if i == 0 { FillTool::Signature } else { FillTool::Initials });
+        let wash = ui.painter().add(egui::Shape::Noop);
+        let row = ui.horizontal(|ui| {
             let (rect, response) = ui.allocate_exact_size(vec2((ui.available_width() - 68.0).max(140.0), 52.0), Sense::click());
             let use_label = label("Use {what}");
-            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, use_label.clone()));
+            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, use_label.clone()));
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, CornerRadius::same(4), Color32::WHITE);
             painter.rect_stroke(
                 rect,
                 CornerRadius::same(4),
-                Stroke::new(1.0, if response.hovered() { t.accent } else { t.border }),
+                Stroke::new(1.0, if on || response.hovered() { t.accent } else { t.border }),
                 egui::StrokeKind::Inside,
             );
             paint_saved(ui, rect.shrink(8.0), saved, &mut app.saved_signature_previews[i], &format!("saved-{what}"));
-            if response.on_hover_text(label("Place saved {what}")).clicked() {
+            if crate::theme::hand(response).on_hover_text(label("Place saved {what}")).clicked() {
                 command = Some(use_id);
             }
             if crate::icons::button(ui, "pencil", 26.0, false, &label("Change {what}")).clicked() {
@@ -396,6 +486,9 @@ pub(crate) fn signature_entries(ui: &mut egui::Ui, app: &mut crate::PdfCraftApp,
                 command = Some(remove_id);
             }
         });
+        if on {
+            ui.painter().set(wash, egui::Shape::rect_filled(row.response.rect.expand(3.0), CornerRadius::same(6), t.accent_soft));
+        }
         ui.add_space(4.0);
     }
     command
@@ -406,9 +499,13 @@ pub(crate) fn signature_entries(ui: &mut egui::Ui, app: &mut crate::PdfCraftApp,
 pub(crate) fn paint_saved(ui: &egui::Ui, rect: egui::Rect, saved: &SavedSig, cache: &mut Option<(SavedSig, egui::TextureHandle)>, key: &str) {
     let painter = ui.painter_at(rect);
     match saved {
-        SavedSig::Typed(text) => {
+        SavedSig::Typed(text) | SavedSig::TypedStyle { text, .. } => {
             if cache.as_ref().is_none_or(|(s, _)| s != saved) {
-                *cache = Some((saved.clone(), ui.ctx().load_texture(key, script_preview(text, 480, 104), egui::TextureOptions::LINEAR)));
+                let style = match saved {
+                    SavedSig::TypedStyle { style, .. } => *style,
+                    _ => pdfcraft_engine::SignatureStyle::Script,
+                };
+                *cache = Some((saved.clone(), ui.ctx().load_texture(key, signature_preview(text, style, 480, 104), egui::TextureOptions::LINEAR)));
             }
             if let Some((_, tex)) = cache {
                 let size = vec2(480.0, 104.0) * (rect.width() / 480.0).min(rect.height() / 104.0);
@@ -447,6 +544,7 @@ pub(crate) struct PageInput<'a> {
     pub(crate) tool: FillTool,
     pub(crate) text_size: f64,
     pub(crate) text_color: [f64; 3],
+    pub(crate) text_border: TextBorder,
     pub(crate) signature: Option<&'a SavedSig>,
     pub(crate) initials: Option<&'a SavedSig>,
     pub(crate) preview: &'a mut Option<(SavedSig, egui::TextureHandle)>,
@@ -455,9 +553,9 @@ pub(crate) struct PageInput<'a> {
 }
 
 /// Preview and clicks with a Fill & Sign tool on one page.
-pub(crate) fn page_input(cx: PageToolContext<'_>, input: PageInput<'_>, view: &mut DocView) -> Option<FillAction> {
+pub(crate) fn page_input(cx: PageToolContext<'_>, input: PageInput<'_>, free: bool, view: &mut DocView) -> Option<FillAction> {
     let PageToolContext { ui, resp, xf, ptr, page, info, .. } = cx;
-    let PageInput { tool, text_size, text_color, signature, initials, preview, author, date_text } = input;
+    let PageInput { tool, text_size, text_color, text_border, signature, initials, preview, author, date_text } = input;
     let pointer = ptr.within(xf.rect)?;
     let p = info.pages.get(page)?;
     let at = to_user(xf, info, page, pointer);
@@ -475,7 +573,8 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, input: PageInput<'_>, view: &m
     } else {
         view.cursor.claim(Layer::ToolArea, if tool == FillTool::Text { egui::CursorIcon::Text } else { egui::CursorIcon::Crosshair });
     }
-    if !resp.clicked() {
+    // The tool's own click: one nobody holds.
+    if !(free && resp.clicked()) {
         return None;
     }
     // Typed text starts a little above the click, as displayed.
@@ -484,22 +583,41 @@ pub(crate) fn page_input(cx: PageToolContext<'_>, input: PageInput<'_>, view: &m
     match tool {
         FillTool::Text => {
             // Clicking away from an open box commits it: the page sees this click before the box
-            // sees its lost focus, so replacing the box first would drop what was typed.
-            let open = view.fill_text.replace(TypeBox { page, at: top, text: String::new(), size: text_size, color: text_color, focus: true });
+            // sees its lost focus, so replacing the box first would drop what was typed. A new box
+            // deselects, as a comment tool's note or text box does: Escape then closes the box and
+            // leaves the tool in two presses.
+            view.comments.clear_selection();
+            let open = view.fill_text.replace(TypeBox {
+                page,
+                at: top,
+                text: String::new(),
+                size: text_size,
+                color: text_color,
+                border: text_border,
+                focus: true,
+            });
             open.filter(|tb| !tb.text.trim().is_empty()).map(|tb| {
-                FillAction::Edit(Box::new(typed_with_color(
+                FillAction::Edit(Box::new(typed_with(
                     tb.page,
                     tb.at,
-                    tb.text.trim(),
+                    &tb.text,
                     tb.size,
                     crate::comments::page_rotation(info, tb.page),
                     author,
-                    tb.color,
+                    TypedLook { color: tb.color, border: tb.border },
                 )))
             })
         }
         FillTool::Date => Some(match date_text {
-            Ok(text) => FillAction::Edit(Box::new(typed_with_color(page, top, text, text_size, rotation, author, text_color))),
+            Ok(text) => FillAction::Edit(Box::new(typed_with(
+                page,
+                top,
+                text,
+                text_size,
+                rotation,
+                author,
+                TypedLook { color: text_color, border: text_border },
+            ))),
             Err(why) => FillAction::Refused(why.clone()),
         }),
         FillTool::Signature => match signature {
@@ -555,14 +673,20 @@ pub(crate) fn type_box(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
             let Some(t) = view.fill_text.as_mut() else { return };
             // The box is white in every theme, so the caret must not follow the theme (pale in dark mode) (#655).
             ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(Color32::WHITE);
-            let width = ((t.text.chars().count().max(8) as f32) * t.size as f32 * 0.6 * zoom).clamp(60.0, 600.0);
+            let font = egui::FontId::proportional((t.size as f32 * zoom).max(8.0));
+            let natural = ui.fonts_mut(|f| f.layout_no_wrap(t.text.clone(), font.clone(), Color32::BLACK).size().x);
+            let margin = egui::Margin::symmetric(4, 2);
+            // Include the field padding and a pixel for layout rounding in the measured width.
+            let width = (natural + margin.sum().x + 1.0).max(8.0 * t.size as f32 * 0.6 * zoom).clamp(60.0, 600.0);
             // The area's max rect is last frame's size, which caps the edit's width; widen it so the
             // box grows as text is typed.
             ui.set_min_width(width);
             let r = ui
                 .add(
-                    egui::TextEdit::singleline(&mut t.text)
-                        .font(egui::FontId::proportional((t.size as f32 * zoom).max(8.0)))
+                    egui::TextEdit::multiline(&mut t.text)
+                        .margin(margin)
+                        .desired_rows(1)
+                        .font(font)
                         .desired_width(width)
                         .background_color(Color32::from_rgba_unmultiplied(255, 255, 255, 230))
                         .text_color(crate::comments::color32(t.color))
@@ -570,11 +694,40 @@ pub(crate) fn type_box(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
                         .id_salt("fill-text-edit"),
                 )
                 .accessible_name(tl!("Text to place"));
+            // The border the text will get, around the box being typed into.
+            if t.border.width > 0.0 {
+                let w = (t.border.width as f32 * zoom).max(1.0);
+                let color = t.border.color.map_or(Color32::BLACK, crate::comments::color32);
+                match t.border.shape {
+                    BorderShape::Rectangle => {
+                        ui.painter().rect_stroke(r.rect, 0.0, Stroke::new(w, color), egui::StrokeKind::Outside);
+                    }
+                    // A circle around the text typed so far, as `typed` will draw it: the box sized to
+                    // the text, the border around that.
+                    BorderShape::Circle => {
+                        let (bw, size) = (t.border.width, t.size);
+                        let longest = pdfcraft_engine::annot_text::text_width(t.text.trim(), size);
+                        let (tw, th) = (longest + 8.0 + 2.0 * bw, size * 1.2 + 6.0 + 2.0 * bw);
+                        let o = BorderShape::Circle.around([0.0, 0.0, tw, th], bw, Some([longest, size * 1.2]));
+                        let centre = pos + egui::vec2((tw / 2.0 - bw) as f32, (th / 2.0 - bw) as f32) * zoom;
+                        let radius = (o[2] - o[0]) as f32 / 2.0 * zoom - w / 2.0;
+                        ui.painter().add(egui::Shape::circle_stroke(centre, radius, Stroke::new(w, color)));
+                    }
+                    // An oval around it, as it will be drawn (half the line outside).
+                    shape => {
+                        let b = r.rect.expand(w);
+                        let o = shape.around([b.min.x, b.min.y, b.max.x, b.max.y].map(f64::from), f64::from(w), None);
+                        let half = egui::vec2((o[2] - o[0]) as f32 / 2.0 - w / 2.0, (o[3] - o[1]) as f32 / 2.0 - w / 2.0);
+                        ui.painter().add(egui::Shape::ellipse_stroke(r.rect.center(), half, Stroke::new(w, color)));
+                    }
+                }
+            }
             if t.focus {
                 r.request_focus();
                 t.focus = false;
             }
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            // Taken here: the same press must not also leave the tool (one step back per press).
+            if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 cancel = true;
             } else if r.lost_focus() {
                 commit = true;
@@ -587,7 +740,8 @@ pub(crate) fn type_box(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, 
     if commit {
         let tb = view.fill_text.take()?;
         if !tb.text.trim().is_empty() {
-            return Some(typed_with_color(tb.page, tb.at, tb.text.trim(), tb.size, crate::comments::page_rotation(info, tb.page), author, tb.color));
+            let look = TypedLook { color: tb.color, border: tb.border };
+            return Some(typed_with(tb.page, tb.at, &tb.text, tb.size, crate::comments::page_rotation(info, tb.page), author, look));
         }
     }
     None
@@ -660,13 +814,28 @@ pub(crate) fn signature_pad(
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, CornerRadius::same(6), Color32::WHITE);
         painter.rect_stroke(rect, CornerRadius::same(6), Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-        let key = SavedSig::Typed(d.text.clone());
+        let key = SavedSig::TypedStyle { text: d.text.clone(), style: d.style };
         if preview.as_ref().is_none_or(|(s, _)| *s != key) {
-            let img = script_preview(&d.text, 920, 300);
+            let img = signature_preview(&d.text, d.style, 920, 300);
             *preview = Some((key, ui.ctx().load_texture("typed-signature", img, egui::TextureOptions::LINEAR)));
         }
         if let Some((_, tex)) = preview {
             painter.image(tex.id(), rect.shrink(4.0), egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
+        ui.horizontal(|ui| {
+            ui.label(tl!("Style"));
+            craft_ui::ComboBox::from_id_salt("typed-signature-style")
+                .selected_text(match d.style {
+                    pdfcraft_engine::SignatureStyle::Script => tl!("Script"),
+                    pdfcraft_engine::SignatureStyle::Print => tl!("Print"),
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut d.style, pdfcraft_engine::SignatureStyle::Script, tl!("Script"));
+                    ui.selectable_value(&mut d.style, pdfcraft_engine::SignatureStyle::Print, tl!("Print"));
+                });
+        });
+        if let Some(c) = pdfcraft_engine::signature_missing(d.text.trim(), d.style) {
+            ui.colored_label(ui.visuals().error_fg_color, signature_style_warning(d.text.trim(), d.style, c));
         }
         let (apply, cancel) = pad_buttons(ui, d);
         return (apply, cancel, false);
@@ -780,7 +949,7 @@ impl crate::PdfCraftApp {
         let epoch = self.dialog_epoch();
         let initials = self.signature_draft.initials;
         let scan = self.signature_draft.scan_mode;
-        let dialog = rfd::AsyncFileDialog::new().add_filter(tl!(if scan { "Photo" } else { "Image" }), &["png", "jpg", "jpeg"]);
+        let dialog = rfd::AsyncFileDialog::new().add_filter_any_case(tl!(if scan { "Photo" } else { "Image" }), &["png", "jpg", "jpeg"]);
         #[cfg(not(target_arch = "wasm32"))]
         self.ask_one(crate::pickers::Ask::File(dialog), None, move |app, path| {
             if app.dialog_epoch() != epoch
@@ -921,6 +1090,21 @@ impl crate::PdfCraftApp {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unsupported_typed_signature_warning_points_to_the_image_tab_when_needed() {
+        let warning = super::signature_style_warning("Ada张", pdfcraft_engine::SignatureStyle::Print, '张');
+        assert!(warning.contains("Image tab"), "{warning}");
+    }
+
+    #[test]
+    fn typed_draft_requires_the_selected_style_to_draw_every_character() {
+        let mut draft = super::SigDraft { text: "Саша".into(), style: pdfcraft_engine::SignatureStyle::Print, ..Default::default() };
+        assert!(draft.ready(), "Inter covers Cyrillic typed signatures");
+        draft.text.push('张');
+        assert!(!draft.ready());
+        assert!(draft.saved().is_none(), "an incomplete signature cannot be applied");
+    }
+
     #[test]
     fn undo_removes_the_last_stroke_and_skips_empty_ones() {
         let mut d = super::SigDraft { drawing: true, ..Default::default() };
