@@ -5,13 +5,14 @@
 //! - for `shipped` and `partial` features, every listed command exists in the engine registry and
 //!   every tool exists in the automation table (so the claim is reachable from the UI and
 //!   headlessly);
-//! - `shipped` features cite at least one test, and every cited `path::fn` exists.
+//! - `shipped` features cite at least one runnable test, and every cited `path::fn` is a test
+//!   function in the parsed Rust source.
 //!
 //! The report gives the shipped share per tier and per area (partial counts half in the
 //! weighted figure). `--json` prints the numbers for STATUS.md; `--partial` lists partial
 //! features with their notes. Fails on any validation error.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -104,15 +105,87 @@ fn valid_milestone(m: &str) -> bool {
     m == "none" || m.strip_prefix('M').and_then(|n| n.parse::<u32>().ok()).is_some_and(|n| n <= 14)
 }
 
-/// Why an `evidence` entry (`path.rs::test_fn`) does not resolve to a test in the source tree, if it doesn't.
-fn evidence_error(ev: &str, repo: &Path) -> Option<String> {
+/// Finds test functions in Rust syntax, including declarations inside `proptest!` blocks.
+#[derive(Default)]
+struct SourceFunctions {
+    functions: HashSet<String>,
+    tests: HashSet<String>,
+}
+
+impl<'ast> syn::visit::Visit<'ast> for SourceFunctions {
+    fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+        let name = item.sig.ident.to_string();
+        self.functions.insert(name.clone());
+        let test_attribute = item.attrs.iter().any(|attr| {
+            let path = attr.path();
+            path.is_ident("test")
+                || path.is_ident("rstest")
+                || (path.segments.len() == 2
+                    && matches!(path.segments[0].ident.to_string().as_str(), "tokio" | "async_std")
+                    && path.segments[1].ident == "test")
+        });
+        if test_attribute {
+            self.tests.insert(name);
+        }
+        syn::visit::visit_item_fn(self, item);
+    }
+
+    fn visit_item_macro(&mut self, item: &'ast syn::ItemMacro) {
+        if item.mac.path.segments.last().is_some_and(|segment| segment.ident == "proptest")
+        {
+            self.tests.extend(proptest_tests(&item.mac.tokens));
+        }
+        syn::visit::visit_item_macro(self, item);
+    }
+}
+
+fn proptest_tests(tokens: &proc_macro2::TokenStream) -> HashSet<String> {
+    use proc_macro2::{Delimiter, TokenTree};
+
+    let items: Vec<_> = tokens.clone().into_iter().collect();
+    let mut tests = HashSet::new();
+    for window in items.windows(4) {
+        let [TokenTree::Punct(hash), TokenTree::Group(attribute), TokenTree::Ident(fun), TokenTree::Ident(candidate)] = window else {
+            continue;
+        };
+        if hash.as_char() == '#'
+            && attribute.delimiter() == Delimiter::Bracket
+            && attribute.stream().to_string().split([' ', ':']).next() == Some("test")
+            && fun == "fn"
+        {
+            tests.insert(candidate.to_string());
+        }
+    }
+    for item in &items {
+        if let TokenTree::Group(group) = item {
+            tests.extend(proptest_tests(&group.stream()));
+        }
+    }
+    tests
+}
+
+fn source_functions(src: &str) -> Option<SourceFunctions> {
+    let file = syn::parse_file(src).ok()?;
+    let mut visitor = SourceFunctions::default();
+    syn::visit::Visit::visit_file(&mut visitor, &file);
+    Some(visitor)
+}
+
+/// Why an `evidence` entry (`path.rs::test_fn`) does not resolve to a runnable test, if it doesn't.
+fn evidence_error(ev: &str, repo: &Path, cache: &mut HashMap<String, Option<SourceFunctions>>) -> Option<String> {
     let Some((path, func)) = ev.split_once("::") else {
         return Some(format!("evidence {ev:?} must be `path.rs::test_fn`"));
     };
-    match std::fs::read_to_string(repo.join(path)) {
-        Ok(src) if src.contains(&format!("fn {func}(")) => None,
-        Ok(_) => Some(format!("evidence: no `fn {func}` in {path}")),
-        Err(_) => Some(format!("evidence: {path} does not exist")),
+    if !cache.contains_key(path) {
+        let Ok(src) = std::fs::read_to_string(repo.join(path)) else {
+            return Some(format!("evidence: {path} does not exist"));
+        };
+        cache.insert(path.to_string(), source_functions(&src));
+    }
+    match cache.get(path).and_then(Option::as_ref) {
+        Some(source) if source.tests.contains(func) => None,
+        Some(source) if source.functions.contains(func) => Some(format!("evidence: `{func}` in {path} is not a test")),
+        _ => Some(format!("evidence: no test function `{func}` in {path}")),
     }
 }
 
@@ -120,6 +193,7 @@ fn evidence_error(ev: &str, repo: &Path) -> Option<String> {
 pub fn validate(features: &[Feature], commands: &HashSet<String>, tools: &HashSet<String>, repo: &Path) -> Vec<String> {
     let mut errors = Vec::new();
     let mut ids = HashSet::new();
+    let mut source_cache = HashMap::new();
     for f in features {
         let e = |m: String| format!("{}: {m}", f.id);
         if !ids.insert(f.id.as_str()) {
@@ -155,7 +229,7 @@ pub fn validate(features: &[Feature], commands: &HashSet<String>, tools: &HashSe
             errors.push(e("shipped features must cite at least one test in `evidence`".into()));
         }
         for ev in &f.evidence {
-            if let Some(m) = evidence_error(ev, repo) {
+            if let Some(m) = evidence_error(ev, repo, &mut source_cache) {
                 errors.push(e(m));
             }
         }
@@ -288,9 +362,38 @@ mod tests {
         bad.evidence = vec!["xtask/src/parity.rs::no_such_test".into(), "nowhere.rs::x".into(), "nopath".into()];
         let errs = validate(&[bad, f("organize.x", "planned"), f("organize.x", "bogus")], &cmds, &tools, &repo);
         let all = errs.join("\n");
-        for needle in ["kebab", "registry", "no `fn no_such_test`", "does not exist", "path.rs::test_fn", "duplicate id", "unknown status"] {
+        for needle in ["kebab", "registry", "no test function `no_such_test`", "does not exist", "path.rs::test_fn", "duplicate id", "unknown status"] {
             assert!(all.contains(needle), "missing {needle:?} in:\n{all}");
         }
         assert!(validate(&[f("organize.y", "shipped")], &cmds, &tools, &repo)[0].contains("at least one test"));
+    }
+
+    #[test]
+    fn validation_rejects_production_functions_as_evidence() {
+        let mut feature = f("organize.false-evidence", "shipped");
+        feature.evidence = vec!["xtask/src/parity.rs::valid_id".into()];
+        let errors = validate(&[feature], &HashSet::new(), &HashSet::new(), &root());
+        assert!(errors.iter().any(|error| error.contains("not a test")), "{errors:?}");
+    }
+
+    #[test]
+    fn evidence_ignores_comments_and_strings_and_accepts_test_macros() {
+        let src = r##"
+            // fn phantom() {}
+            const TEXT: &str = "#[test] fn phantom() {}";
+            #[not_a_test::test]
+            fn also_phantom() {}
+            #[tokio::test]
+            async fn async_case() {}
+            proptest! {
+                #[test]
+                fn property_case(value in 0u8..10) { let _ = value; }
+            }
+        "##;
+        let source = source_functions(src).expect("synthetic Rust source parses");
+        assert!(!source.tests.contains("phantom"));
+        assert!(!source.tests.contains("also_phantom"));
+        assert!(source.tests.contains("async_case"));
+        assert!(source.tests.contains("property_case"));
     }
 }
